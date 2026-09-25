@@ -1,0 +1,6 @@
+{
+  "name": "Cainta Photography Studio MIS",
+  "description": "Multi-role Photography Studio Management Information System for Cainta, Rizal featuring directory, online booking, print ordering, proofing, PayMongo GCash QR, and studio operations.",
+  "requestFramePermissions": ["geolocation"],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
