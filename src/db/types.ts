@@ -9,6 +9,7 @@ export interface User {
   studioId?: string;
   contactNumber?: string;
   address?: string;
+  avatar?: string;
   status?: 'active' | 'suspended';
   createdAt: string;
 }
@@ -20,6 +21,16 @@ export interface Customer {
   contactNumber?: string;
   address?: string;
   createdAt: string;
+}
+
+export interface StudioSocialLinks {
+  facebook?: string;
+  website?: string;
+  instagram?: string;
+  tiktok?: string;
+  youtube?: string;
+  twitter?: string;
+  other?: string;
 }
 
 export interface Studio {
@@ -50,8 +61,16 @@ export interface Studio {
   blockedDates?: string[];
   gcashName?: string;
   gcashNumber?: string;
+  gcashQrCode?: string;
   portfolioImages?: string[];
   servicesOffered?: string[];
+  website?: string;
+  facebook?: string;
+  instagram?: string;
+  tiktok?: string;
+  youtube?: string;
+  twitter?: string;
+  socialLinks?: StudioSocialLinks;
   createdAt: string;
 }
 
@@ -110,6 +129,7 @@ export interface Addon {
 export type BookingStatus =
   | 'Pending'
   | 'Awaiting Payment'
+  | 'Payment Under Review'
   | 'Confirmed'
   | 'Ongoing'
   | 'Completed'
@@ -118,7 +138,7 @@ export type BookingStatus =
   | 'No Show'
   | 'Expired';
 
-export type PaymentStatus = 'unpaid' | 'downpayment_paid' | 'fully_paid' | 'refunded';
+export type PaymentStatus = 'unpaid' | 'pending_verification' | 'downpayment_paid' | 'fully_paid' | 'refunded';
 
 export interface Booking {
   id: string;
@@ -143,6 +163,8 @@ export interface Booking {
   finalPaymentStatus: 'unpaid' | 'paid' | 'waived';
   paymentOption: 'downpayment' | 'full';
   paymentDueAt: string;
+  paymentReference?: string;
+  proofOfPayment?: string;
   cancellationReason?: string;
   cancelledBy?: string;
   cancelledAt?: string;
@@ -150,6 +172,8 @@ export interface Booking {
   checklist?: { item: string; completed: boolean }[];
   lastReminderSentAt?: string;
   reminderCount?: number;
+  archivedByCustomer?: boolean;
+  archivedAt?: string;
   createdAt: string;
 }
 
@@ -182,11 +206,16 @@ export interface GCashQRSession {
   bookingId?: string;
   printOrderId?: string;
   studioId: string;
+  studioName?: string;
+  studioGcashName?: string;
+  studioGcashNumber?: string;
   customerId: string;
-  gateway: 'paymongo';
+  gateway: 'paymongo' | 'direct_gcash';
   gatewayPaymentIntentId: string;
-  qrCodeData: string; // base64 QR image
+  qrCodeData: string; // base64 QR image or direct studio QR image
   amount: number;
+  fullAmount?: number;
+  downPaymentAmount?: number;
   paymentType: 'downpayment' | 'full' | 'balance' | 'print_order';
   status: 'pending' | 'paid' | 'expired';
   expiresAt: string;

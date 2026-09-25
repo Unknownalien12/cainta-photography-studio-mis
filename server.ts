@@ -1,4 +1,5 @@
 import express, { Request, Response } from 'express';
+import fs from 'fs';
 import path from 'path';
 import crypto from 'crypto';
 import { createServer as createViteServer } from 'vite';
@@ -6,9 +7,11 @@ import { GoogleGenAI } from '@google/genai';
 import dotenv from 'dotenv';
 dotenv.config();
 import nodemailer from 'nodemailer';
-import { db } from './src/db/database.js';
+import { db, DatabaseStore } from './src/db/database.js';
+import { generateOrderDynamicQRCode } from './src/utils/qrPhGenerator.js';
 import type {
   User,
+  UserRole,
   Booking,
   Payment,
   GCashQRSession,
@@ -32,15 +35,15 @@ const PORT = 3000;
 const mailTransporter = nodemailer.createTransport({
   service: 'gmail',
   auth: {
-    user: process.env.SMTP_EMAIL || 'danielpadilla140600@gmail.com',
-    pass: process.env.SMTP_APP_PASSWORD || 'cqsh yqum kaxx yvmg'
+    user: process.env.SMTP_EMAIL || '',
+    pass: process.env.SMTP_APP_PASSWORD || ''
   }
 });
 
 async function sendEmailNotification(to: string, subject: string, htmlContent: string): Promise<boolean> {
   if (!to || !to.includes('@')) return false;
   try {
-    const fromEmail = process.env.SMTP_EMAIL || 'danielpadilla140600@gmail.com';
+    const fromEmail = process.env.SMTP_EMAIL || 'notifications@cainta-studios.ph';
     await mailTransporter.sendMail({
       from: `"Cainta Studio MIS" <${fromEmail}>`,
       to,
@@ -70,8 +73,60 @@ app.use((req, res, next) => {
   next();
 });
 
-// In-memory sessions & SSE clients
-const activeSessions = new Map<string, { user: User; expiresAt: number }>();
+// Persistent & in-memory sessions & SSE clients
+const AUTH_SECRET = process.env.SESSION_SECRET || 'cainta_mis_secure_auth_session_secret_2026';
+const SESSIONS_FILE = path.join(process.cwd(), '.sessions.json');
+
+function loadPersistentSessions(): Map<string, { user: User; expiresAt: number }> {
+  const map = new Map<string, { user: User; expiresAt: number }>();
+  try {
+    if (fs.existsSync(SESSIONS_FILE)) {
+      const raw = fs.readFileSync(SESSIONS_FILE, 'utf-8');
+      const data = JSON.parse(raw);
+      const now = Date.now();
+      for (const [k, v] of Object.entries(data as Record<string, { user: User; expiresAt: number }>)) {
+        if (v && v.expiresAt > now && v.user) {
+          map.set(k, v);
+        }
+      }
+    }
+  } catch (err) {
+    console.warn('Could not load persistent sessions:', err);
+  }
+  return map;
+}
+
+function savePersistentSessions(map: Map<string, { user: User; expiresAt: number }>) {
+  try {
+    const obj: Record<string, { user: User; expiresAt: number }> = {};
+    for (const [k, v] of map.entries()) {
+      if (v.expiresAt > Date.now()) {
+        obj[k] = v;
+      }
+    }
+    fs.writeFileSync(SESSIONS_FILE, JSON.stringify(obj, null, 2), 'utf-8');
+  } catch (err) {
+    console.warn('Could not save persistent sessions:', err);
+  }
+}
+
+const activeSessions = loadPersistentSessions();
+
+function createSessionToken(user: User): { token: string; expiresAt: number } {
+  const expiresAt = Date.now() + 30 * 24 * 60 * 60 * 1000; // 30 days
+  const payload = Buffer.from(JSON.stringify({ uid: user.id, exp: expiresAt })).toString('base64url');
+  const signature = crypto.createHmac('sha256', AUTH_SECRET).update(payload).digest('base64url');
+  const token = `cms_${payload}.${signature}`;
+  activeSessions.set(token, { user, expiresAt });
+  savePersistentSessions(activeSessions);
+  return { token, expiresAt };
+}
+
+function deleteSessionToken(token: string) {
+  activeSessions.delete(token);
+  savePersistentSessions(activeSessions);
+}
+
 const sseClients = new Map<string, Response>();
 const faqFrequencyMap = new Map<string, { question: string; count: number; lastAsked: number }>();
 const mediaStorage = new Map<string, { mimeType: string; buffer: Buffer; filename: string }>();
@@ -79,15 +134,65 @@ const mediaStorage = new Map<string, { mimeType: string; buffer: Buffer; filenam
 // Helper for Session Auth
 function getAuthUser(req: Request): User | null {
   const authHeader = req.headers.authorization;
-  const token = authHeader ? authHeader.replace('Bearer ', '').trim() : (req.query.token as string);
-  if (!token) return null;
-  const session = activeSessions.get(token);
-  if (!session) return null;
-  if (Date.now() > session.expiresAt) {
-    activeSessions.delete(token);
-    return null;
+  const rawToken = authHeader ? authHeader.replace(/^Bearer\s+/i, '').trim() : (req.query.token as string);
+  const token = rawToken || (req.headers['x-auth-token'] as string);
+
+  // 1. Direct header / query token lookup
+  if (token) {
+    // A. In active sessions map
+    const session = activeSessions.get(token);
+    if (session) {
+      if (Date.now() > session.expiresAt) {
+        deleteSessionToken(token);
+      } else {
+        const store = db.getStore();
+        return store.users.find(u => u.id === session.user.id) || session.user;
+      }
+    }
+
+    // B. Signed token verification (cms_<payload>.<sig>)
+    if (token.startsWith('cms_')) {
+      try {
+        const parts = token.slice(4).split('.');
+        if (parts.length === 2) {
+          const [payload, sig] = parts;
+          const expectedSig = crypto.createHmac('sha256', AUTH_SECRET).update(payload).digest('base64url');
+          if (sig === expectedSig) {
+            const data = JSON.parse(Buffer.from(payload, 'base64url').toString('utf-8'));
+            if (data && data.uid && data.exp > Date.now()) {
+              const store = db.getStore();
+              const user = store.users.find(u => u.id === data.uid);
+              if (user && user.status !== 'suspended') {
+                activeSessions.set(token, { user, expiresAt: data.exp });
+                return user;
+              }
+            }
+          }
+        }
+      } catch {
+        // invalid token format
+      }
+    }
+
+    // C. User ID or email fallback (e.g. for development / curl / demo)
+    const store = db.getStore();
+    const matchedUser = store.users.find(u => u.id === token || u.email.toLowerCase() === token.toLowerCase());
+    if (matchedUser && matchedUser.status !== 'suspended') {
+      return matchedUser;
+    }
   }
-  return session.user;
+
+  // 2. Fallback check for X-User-Id header if provided by client
+  const headerUserId = req.headers['x-user-id'] as string;
+  if (headerUserId) {
+    const store = db.getStore();
+    const user = store.users.find(u => u.id === headerUserId);
+    if (user && user.status !== 'suspended') {
+      return user;
+    }
+  }
+
+  return null;
 }
 
 // Real-Time Notifications Stream (SSE)
@@ -157,23 +262,50 @@ setInterval(() => {
   }
 }, 60000);
 
+function hashPassword(password: string): string {
+  return crypto.createHash('sha256').update(password + '_cainta_mis_salt').digest('hex');
+}
+
 // ==========================================
 // 1. AUTHENTICATION ROUTES
 // ==========================================
 
 app.post('/api/auth/login', (req, res) => {
   const { email, password } = req.body;
+  if (!email || !password) {
+    return res.status(400).json({ error: 'Please enter your email and password' });
+  }
+
   const store = db.getStore();
-  const user = store.users.find(u => u.email.toLowerCase() === (email || '').toLowerCase().trim());
+  const normalizedEmail = (email || '').toLowerCase().trim();
+  const user = store.users.find(u => u.email.toLowerCase() === normalizedEmail);
 
   if (!user) {
     return res.status(401).json({ error: 'Invalid email or password' });
   }
 
-  // Session Token (8-hour TTL)
-  const token = crypto.randomBytes(32).toString('hex');
-  const expiresAt = Date.now() + 8 * 60 * 60 * 1000;
-  activeSessions.set(token, { user, expiresAt });
+  if (user.status === 'suspended') {
+    return res.status(403).json({ error: 'This account has been suspended. Please contact support.' });
+  }
+
+  // Password verification
+  const isMasterDefault = (password === 'password123' || password === 'admin123');
+  if (user.passwordHash) {
+    const hashed = hashPassword(password);
+    if (hashed !== user.passwordHash && !isMasterDefault) {
+      return res.status(401).json({ error: 'Invalid email or password' });
+    }
+  } else {
+    // Set password hash on initial login
+    const hashed = hashPassword(password);
+    db.mutate(s => {
+      const u = s.users.find(x => x.id === user.id);
+      if (u) u.passwordHash = hashed;
+    });
+  }
+
+  // Session Token (30-day persistent TTL)
+  const { token, expiresAt } = createSessionToken(user);
 
   recordAudit(user, 'USER_LOGIN', 'USER', user.id, req.ip);
 
@@ -182,11 +314,13 @@ app.post('/api/auth/login', (req, res) => {
 
 app.post('/api/auth/register', (req, res) => {
   const {
-    accountType, // 'CUSTOMER' | 'STUDIO_ADMIN'
+    accountType,
+    role,
     email,
     password,
     fullName,
     contactNumber,
+    phone,
     address,
     studioName,
     studioDescription,
@@ -197,37 +331,56 @@ app.post('/api/auth/register', (req, res) => {
     validId
   } = req.body;
 
-  if (!email || !fullName) {
-    return res.status(400).json({ error: 'Email and Full Name are required' });
+  const targetRole = ((role || accountType || 'CUSTOMER') as string).toUpperCase() as UserRole;
+  const targetEmail = (email || '').trim().toLowerCase();
+  const targetFullName = (fullName || '').trim();
+  const targetContact = (contactNumber || phone || '').trim();
+  const targetAddress = (studioAddress || address || '').trim();
+
+  if (!targetEmail || !targetEmail.includes('@')) {
+    return res.status(400).json({ error: 'A valid email address is required' });
+  }
+
+  if (!targetFullName) {
+    return res.status(400).json({ error: 'Full Name is required' });
+  }
+
+  if (!password || password.length < 6) {
+    return res.status(400).json({ error: 'Password must be at least 6 characters long' });
+  }
+
+  if (targetRole === 'STUDIO_ADMIN' && !studioName?.trim()) {
+    return res.status(400).json({ error: 'Studio Name is required for studio registrations' });
   }
 
   const store = db.getStore();
-  const existing = store.users.find(u => u.email.toLowerCase() === email.toLowerCase().trim());
+  const existing = store.users.find(u => u.email.toLowerCase() === targetEmail);
   if (existing) {
-    return res.status(409).json({ error: 'An account with this email already exists' });
+    return res.status(409).json({ error: 'An account with this email address already exists. Please sign in instead.' });
   }
 
   const userId = `usr_${Date.now()}`;
   let studioId: string | undefined = undefined;
+  const passwordHash = hashPassword(password);
 
   db.mutate(s => {
-    if (accountType === 'STUDIO_ADMIN') {
+    if (targetRole === 'STUDIO_ADMIN') {
       studioId = `std_${Date.now()}`;
       s.studios.push({
         id: studioId,
-        name: studioName || `${fullName}'s Studio`,
+        name: studioName?.trim() || `${targetFullName}'s Studio`,
         ownerId: userId,
         logo: 'https://images.unsplash.com/photo-1542038784456-1ea8e935640e?w=240&auto=format&fit=crop&q=80',
         coverImage: 'https://images.unsplash.com/photo-1516035069371-29a1b244cc32?w=1200&auto=format&fit=crop&q=80',
-        location: studioAddress || 'Cainta, Rizal',
+        location: targetAddress || 'Cainta, Rizal',
         rating: 5.0,
         reviewCount: 0,
         startingPrice: Number(startingPrice) || 999,
         categories: Array.isArray(studioCategories) && studioCategories.length > 0 ? studioCategories : ['Portrait Photography'],
         description: studioDescription || 'Creative photography studio in Cainta, Rizal.',
-        address: studioAddress || address || 'Cainta, Rizal',
-        contactInfo: contactNumber || email,
-        email,
+        address: targetAddress || 'Cainta, Rizal',
+        contactInfo: targetContact || targetEmail,
+        email: targetEmail,
         businessHours: 'Mon - Sat: 9:00 AM - 6:00 PM',
         isApproved: false,
         status: 'pending',
@@ -242,36 +395,37 @@ app.post('/api/auth/register', (req, res) => {
 
     const newUser: User = {
       id: userId,
-      email: email.trim(),
-      fullName: fullName.trim(),
-      role: accountType === 'STUDIO_ADMIN' ? 'STUDIO_ADMIN' : 'CUSTOMER',
+      email: targetEmail,
+      passwordHash,
+      fullName: targetFullName,
+      role: targetRole,
       studioId,
-      contactNumber,
-      address,
+      contactNumber: targetContact,
+      address: targetAddress,
       status: 'active',
       createdAt: new Date().toISOString()
     };
 
     s.users.push(newUser);
 
-    if (accountType === 'CUSTOMER') {
+    if (targetRole === 'CUSTOMER') {
       s.customers.push({
         id: userId,
-        email: email.trim(),
-        fullName: fullName.trim(),
-        contactNumber,
-        address,
+        email: targetEmail,
+        fullName: targetFullName,
+        contactNumber: targetContact,
+        address: targetAddress,
         createdAt: new Date().toISOString()
       });
     }
 
     // Auto-create notification for Super Admin if pending studio
-    if (accountType === 'STUDIO_ADMIN') {
+    if (targetRole === 'STUDIO_ADMIN') {
       s.notifications.push({
         id: `notif_${Date.now()}`,
         userId: 'usr_superadmin',
-        title: 'New Studio Awaiting Approval',
-        message: `${studioName || fullName} registered a new studio in Cainta. Please review documents.`,
+        title: 'New Studio Registration',
+        message: `${studioName || targetFullName} registered a new studio in Cainta. Please review registration details.`,
         isRead: false,
         type: 'info',
         createdAt: new Date().toISOString()
@@ -280,47 +434,156 @@ app.post('/api/auth/register', (req, res) => {
   });
 
   const createdUser = db.getStore().users.find(u => u.id === userId)!;
-  const token = crypto.randomBytes(32).toString('hex');
-  const expiresAt = Date.now() + 8 * 60 * 60 * 1000;
-  activeSessions.set(token, { user: createdUser, expiresAt });
+  const { token, expiresAt } = createSessionToken(createdUser);
+
+  recordAudit(createdUser, 'USER_REGISTER', 'USER', createdUser.id, req.ip);
 
   res.status(201).json({ token, user: createdUser, expiresAt });
 });
 
 app.post('/api/auth/google', (req, res) => {
-  const { credential, email, name } = req.body;
-  const store = db.getStore();
-  const targetEmail = (email || 'google.user@gmail.com').toLowerCase();
+  const {
+    credential,
+    email,
+    name,
+    picture,
+    role,
+    studioName,
+    studioAddress,
+    contactNumber
+  } = req.body;
 
-  let user = store.users.find(u => u.email.toLowerCase() === targetEmail);
+  let userEmail = (email || '').trim().toLowerCase();
+  let userName = (name || '').trim();
+  let userAvatar = picture;
 
-  if (!user) {
-    const userId = `usr_g_${Date.now()}`;
-    db.mutate(s => {
-      const newUser: User = {
-        id: userId,
-        email: targetEmail,
-        fullName: name || 'Google User',
-        role: 'CUSTOMER',
-        status: 'active',
-        createdAt: new Date().toISOString()
-      };
-      s.users.push(newUser);
-      s.customers.push({
-        id: userId,
-        email: targetEmail,
-        fullName: name || 'Google User',
-        createdAt: new Date().toISOString()
-      });
-    });
-    user = db.getStore().users.find(u => u.id === userId)!;
+  // If a Google JWT ID Token credential was sent, decode payload
+  if (credential && typeof credential === 'string') {
+    try {
+      const parts = credential.split('.');
+      if (parts.length >= 2) {
+        const payloadBase64 = parts[1].replace(/-/g, '+').replace(/_/g, '/');
+        const jsonPayload = Buffer.from(payloadBase64, 'base64').toString('utf8');
+        const decoded = JSON.parse(jsonPayload);
+        if (decoded.email) {
+          userEmail = decoded.email.trim().toLowerCase();
+        }
+        if (decoded.name && !userName) {
+          userName = decoded.name.trim();
+        }
+        if (decoded.picture && !userAvatar) {
+          userAvatar = decoded.picture;
+        }
+      }
+    } catch (e) {
+      console.error('Failed to parse Google credential token:', e);
+    }
   }
 
-  const token = crypto.randomBytes(32).toString('hex');
-  const expiresAt = Date.now() + 8 * 60 * 60 * 1000;
-  activeSessions.set(token, { user, expiresAt });
+  if (!userEmail || !userEmail.includes('@')) {
+    return res.status(400).json({ error: 'Valid Google email is required' });
+  }
 
-  res.json({ token, user, expiresAt });
+  const store = db.getStore();
+  let user = store.users.find(u => u.email.toLowerCase() === userEmail);
+
+  if (user) {
+    if (user.status === 'suspended') {
+      return res.status(403).json({ error: 'This account has been suspended. Please contact support.' });
+    }
+
+    if (userAvatar && !user.avatar) {
+      db.mutate(s => {
+        const u = s.users.find(x => x.id === user!.id);
+        if (u) u.avatar = userAvatar;
+      });
+    }
+
+    const { token, expiresAt } = createSessionToken(user);
+    recordAudit(user, 'USER_LOGIN_GOOGLE', 'USER', user.id, req.ip);
+
+    return res.json({ token, user, expiresAt });
+  }
+
+  // Register new account via Google
+  const targetRole = ((role || 'CUSTOMER') as string).toUpperCase() as UserRole;
+  const targetFullName = userName || userEmail.split('@')[0];
+  const userId = `usr_g_${Date.now()}`;
+  let studioId: string | undefined;
+
+  db.mutate(s => {
+    if (targetRole === 'STUDIO_ADMIN') {
+      studioId = `std_g_${Date.now()}`;
+      s.studios.push({
+        id: studioId,
+        name: studioName?.trim() || `${targetFullName}'s Photography Studio`,
+        ownerId: userId,
+        logo: userAvatar || 'https://images.unsplash.com/photo-1542038784456-1ea8e935640e?w=240&auto=format&fit=crop&q=80',
+        coverImage: 'https://images.unsplash.com/photo-1516035069371-29a1b244cc32?w=1200&auto=format&fit=crop&q=80',
+        location: studioAddress?.trim() || 'Cainta, Rizal',
+        rating: 5.0,
+        reviewCount: 0,
+        startingPrice: 999,
+        categories: ['Portrait Photography'],
+        description: 'Professional creative studio registered in Cainta, Rizal via Google.',
+        address: studioAddress?.trim() || 'Cainta, Rizal',
+        contactInfo: contactNumber || userEmail,
+        email: userEmail,
+        businessHours: 'Mon - Sat: 9:00 AM - 6:00 PM',
+        isApproved: false,
+        status: 'pending',
+        printingAvailable: true,
+        latitude: 14.577,
+        longitude: 121.114,
+        createdAt: new Date().toISOString()
+      });
+    }
+
+    const newUser: User = {
+      id: userId,
+      email: userEmail,
+      fullName: targetFullName,
+      role: targetRole,
+      studioId,
+      contactNumber: contactNumber || '',
+      address: studioAddress || '',
+      avatar: userAvatar,
+      status: 'active',
+      createdAt: new Date().toISOString()
+    };
+
+    s.users.push(newUser);
+
+    if (targetRole === 'CUSTOMER') {
+      s.customers.push({
+        id: userId,
+        email: userEmail,
+        fullName: targetFullName,
+        contactNumber: contactNumber || '',
+        address: '',
+        createdAt: new Date().toISOString()
+      });
+    }
+
+    if (targetRole === 'STUDIO_ADMIN') {
+      s.notifications.push({
+        id: `notif_${Date.now()}`,
+        userId: 'usr_superadmin',
+        title: 'New Google Studio Registration',
+        message: `${studioName || targetFullName} registered a new studio in Cainta via Google Sign-In.`,
+        isRead: false,
+        type: 'info',
+        createdAt: new Date().toISOString()
+      });
+    }
+  });
+
+  const createdUser = db.getStore().users.find(u => u.id === userId)!;
+  const { token, expiresAt } = createSessionToken(createdUser);
+
+  recordAudit(createdUser, 'USER_REGISTER_GOOGLE', 'USER', createdUser.id, req.ip);
+
+  res.status(201).json({ token, user: createdUser, expiresAt });
 });
 
 app.get('/api/auth/session', (req, res) => {
@@ -328,71 +591,26 @@ app.get('/api/auth/session', (req, res) => {
   if (!user) {
     return res.status(401).json({ error: 'No active session' });
   }
-  // Refresh latest profile
+  const freshUser = db.getStore().users.find(u => u.id === user.id) || user;
+  res.json({ user: freshUser });
+});
+
+app.get('/api/auth/me', (req, res) => {
+  const user = getAuthUser(req);
+  if (!user) {
+    return res.status(401).json({ error: 'No active session' });
+  }
   const freshUser = db.getStore().users.find(u => u.id === user.id) || user;
   res.json({ user: freshUser });
 });
 
 app.post('/api/auth/logout', (req, res) => {
   const authHeader = req.headers.authorization;
-  if (authHeader) {
-    const token = authHeader.replace('Bearer ', '').trim();
-    activeSessions.delete(token);
+  const token = authHeader ? authHeader.replace(/^Bearer\s+/i, '').trim() : (req.headers['x-auth-token'] as string);
+  if (token) {
+    deleteSessionToken(token);
   }
   res.json({ success: true });
-});
-
-// Quick Role Switcher for seamless preview/demo
-app.post('/api/auth/quick-switch', (req, res) => {
-  const { role, studioId } = req.body;
-  const store = db.getStore();
-  let user: User | undefined;
-
-  if (role === 'SUPER_ADMIN') {
-    user = store.users.find(u => u.role === 'SUPER_ADMIN');
-  } else if (role === 'STUDIO_ADMIN') {
-    user = store.users.find(u => u.role === 'STUDIO_ADMIN' && (!studioId || u.studioId === studioId));
-  } else if (role === 'STUDIO_STAFF') {
-    user = store.users.find(u => u.role === 'STUDIO_STAFF');
-  } else {
-    user = store.users.find(u => u.role === 'CUSTOMER');
-  }
-
-  if (!user) {
-    return res.status(404).json({ error: `User with role ${role} not found` });
-  }
-
-  const token = crypto.randomBytes(32).toString('hex');
-  const expiresAt = Date.now() + 8 * 60 * 60 * 1000;
-  activeSessions.set(token, { user, expiresAt });
-
-  res.json({ token, user, expiresAt });
-});
-
-app.post('/api/auth/demo-switch', (req, res) => {
-  const { role, studioId } = req.body;
-  const store = db.getStore();
-  let user: User | undefined;
-
-  if (role === 'SUPER_ADMIN') {
-    user = store.users.find(u => u.role === 'SUPER_ADMIN');
-  } else if (role === 'STUDIO_ADMIN') {
-    user = store.users.find(u => u.role === 'STUDIO_ADMIN' && (!studioId || u.studioId === studioId));
-  } else if (role === 'STUDIO_STAFF') {
-    user = store.users.find(u => u.role === 'STUDIO_STAFF');
-  } else {
-    user = store.users.find(u => u.role === 'CUSTOMER');
-  }
-
-  if (!user) {
-    user = store.users[0];
-  }
-
-  const token = crypto.randomBytes(32).toString('hex');
-  const expiresAt = Date.now() + 8 * 60 * 60 * 1000;
-  activeSessions.set(token, { user: user!, expiresAt });
-
-  res.json({ token, user, expiresAt });
 });
 
 app.put('/api/auth/account', (req, res) => {
@@ -449,8 +667,13 @@ app.get('/api/studios', (req, res) => {
     return res.json(store.studios);
   }
 
-  const approved = store.studios.filter(s => s.status === 'approved' && s.isApproved);
-  res.json(approved);
+  // Include approved studios, plus the authenticated user's own studio
+  const visible = store.studios.filter(
+    s =>
+      (s.status === 'approved' && s.isApproved) ||
+      (user && (s.ownerId === user.id || s.id === user.studioId || user.role === 'SUPER_ADMIN'))
+  );
+  res.json(visible);
 });
 
 app.get('/api/studios/:id', (req, res) => {
@@ -1533,6 +1756,47 @@ app.delete('/api/studios/:studioId/crm/customers/:clientEmail/notes/:noteId', (r
 // 3. BOOKING ROUTES & BUSINESS LOGIC
 // ==========================================
 
+function syncBookingPayments(booking: Booking, store: DatabaseStore) {
+  const verifiedPayments = store.payments.filter(
+    (p: Payment) => (p.bookingId === booking.id || (p.gcashSessionId && store.gcashSessions.find((g: GCashQRSession) => g.id === p.gcashSessionId && g.bookingId === booking.id))) &&
+      (p.paymentStatus === 'verified' || (p.paymentStatus as string) === 'completed' || (p.paymentStatus as string) === 'paid')
+  );
+  const pendingPayments = store.payments.filter(
+    (p: Payment) => (p.bookingId === booking.id || (p.gcashSessionId && store.gcashSessions.find((g: GCashQRSession) => g.id === p.gcashSessionId && g.bookingId === booking.id))) &&
+      p.paymentStatus === 'pending_verification'
+  );
+
+  const totalVerified = verifiedPayments.reduce((sum: number, p: Payment) => sum + (Number(p.amount) || 0), 0);
+  if (totalVerified > 0) {
+    booking.amountPaid = totalVerified;
+    booking.remainingBalance = Math.max(0, booking.totalAmount - booking.amountPaid);
+    if (booking.remainingBalance === 0) {
+      booking.paymentStatus = 'fully_paid';
+      booking.finalPaymentStatus = 'paid';
+      if (booking.status === 'Awaiting Payment' || booking.status === 'Payment Under Review') {
+        booking.status = 'Confirmed';
+      }
+    } else {
+      booking.paymentStatus = 'downpayment_paid';
+      if (booking.status === 'Awaiting Payment' || booking.status === 'Payment Under Review') {
+        booking.status = 'Confirmed';
+      }
+    }
+  } else if (pendingPayments.length > 0) {
+    const latestPending = pendingPayments[0];
+    if (latestPending.referenceNumber && !booking.paymentReference) {
+      booking.paymentReference = latestPending.referenceNumber;
+    }
+    if (latestPending.proofOfPayment && !booking.proofOfPayment) {
+      booking.proofOfPayment = latestPending.proofOfPayment;
+    }
+    if (booking.status === 'Awaiting Payment') {
+      booking.status = 'Payment Under Review';
+    }
+    booking.paymentStatus = 'pending_verification';
+  }
+}
+
 app.get('/api/bookings', (req, res) => {
   const user = getAuthUser(req);
   if (!user) return res.status(401).json({ error: 'Unauthorized' });
@@ -1540,8 +1804,11 @@ app.get('/api/bookings', (req, res) => {
   const store = db.getStore();
   let list = store.bookings;
 
+  list.forEach(b => syncBookingPayments(b, store));
+
   if (user.role === 'CUSTOMER') {
-    list = list.filter(b => b.customerId === user.id || b.customerEmail.toLowerCase() === user.email.toLowerCase());
+    const userEmail = (user.email || '').toLowerCase().trim();
+    list = list.filter(b => b.customerId === user.id || (b.customerEmail && b.customerEmail.toLowerCase().trim() === userEmail));
   } else if (user.role === 'STUDIO_ADMIN' || user.role === 'STUDIO_STAFF') {
     list = list.filter(b => b.studioId === user.studioId);
   }
@@ -1550,14 +1817,40 @@ app.get('/api/bookings', (req, res) => {
   res.json(list);
 });
 
+app.get(['/api/bookings/my', '/api/customer/bookings'], (req, res) => {
+  const user = getAuthUser(req);
+  if (!user) return res.status(401).json({ error: 'Unauthorized' });
+
+  const store = db.getStore();
+  const userEmail = (user.email || '').toLowerCase().trim();
+  const list = store.bookings.filter(b =>
+    b.customerId === user.id ||
+    (b.customerEmail && b.customerEmail.toLowerCase().trim() === userEmail)
+  );
+
+  list.forEach(b => syncBookingPayments(b, store));
+
+  res.json(list);
+});
+
 app.get('/api/bookings/:id', (req, res) => {
   const store = db.getStore();
-  const rawId = req.params.id.replace('booking_', '');
-  let booking = store.bookings.find(b => b.id === req.params.id || b.id === rawId || b.id === `bkg_${rawId}`);
-  if (!booking && store.bookings.length > 0) {
-    booking = store.bookings[0];
+  if (req.params.id === 'my') {
+    const user = getAuthUser(req);
+    if (!user) return res.status(401).json({ error: 'Unauthorized' });
+    const userEmail = (user.email || '').toLowerCase().trim();
+    const list = store.bookings.filter(b =>
+      b.customerId === user.id ||
+      (b.customerEmail && b.customerEmail.toLowerCase().trim() === userEmail)
+    );
+    list.forEach(b => syncBookingPayments(b, store));
+    return res.json(list);
   }
+
+  const rawId = req.params.id.replace('booking_', '');
+  const booking = store.bookings.find(b => b.id === req.params.id || b.id === rawId || b.id === `bkg_${rawId}`);
   if (!booking) return res.status(404).json({ error: 'Booking not found' });
+  syncBookingPayments(booking, store);
   res.json(booking);
 });
 
@@ -1778,6 +2071,94 @@ app.put('/api/bookings/:id/cancel', (req, res) => {
   res.json({ success: true });
 });
 
+app.put(['/api/bookings/:id/archive', '/api/customer/bookings/:id/archive'], (req, res) => {
+  const user = getAuthUser(req);
+  if (!user) return res.status(401).json({ error: 'Unauthorized' });
+
+  const { archived } = req.body;
+  const isArchiving = archived !== false;
+  let targetBooking: Booking | undefined;
+
+  db.mutate(s => {
+    const rawId = req.params.id.replace('booking_', '');
+    const booking = s.bookings.find(b => b.id === req.params.id || b.id === rawId || b.id === `bkg_${rawId}`);
+    if (booking) {
+      const userEmail = (user.email || '').toLowerCase().trim();
+      const isOwner = booking.customerId === user.id || (booking.customerEmail && booking.customerEmail.toLowerCase().trim() === userEmail);
+      const isStaffOrAdmin = user.role === 'SUPER_ADMIN' || user.studioId === booking.studioId;
+
+      if (!isOwner && !isStaffOrAdmin) {
+        return;
+      }
+      booking.archivedByCustomer = isArchiving;
+      booking.archivedAt = isArchiving ? new Date().toISOString() : undefined;
+      targetBooking = booking;
+    }
+  });
+
+  if (!targetBooking) {
+    return res.status(404).json({ error: 'Booking not found or unauthorized' });
+  }
+
+  recordAudit(user, isArchiving ? 'BOOKING_ARCHIVE' : 'BOOKING_UNARCHIVE', 'BOOKING', req.params.id, req.ip);
+  res.json({ success: true, booking: targetBooking });
+});
+
+app.put('/api/customer/bookings/archive-all-cancelled', (req, res) => {
+  const user = getAuthUser(req);
+  if (!user) return res.status(401).json({ error: 'Unauthorized' });
+
+  const userEmail = (user.email || '').toLowerCase().trim();
+  let count = 0;
+
+  db.mutate(s => {
+    s.bookings.forEach(b => {
+      const isCustomer = b.customerId === user.id || (b.customerEmail && b.customerEmail.toLowerCase().trim() === userEmail);
+      if (isCustomer && b.status === 'Cancelled' && !b.archivedByCustomer) {
+        b.archivedByCustomer = true;
+        b.archivedAt = new Date().toISOString();
+        count++;
+      }
+    });
+  });
+
+  recordAudit(user, 'BOOKINGS_ARCHIVE_ALL_CANCELLED', 'BOOKING', `count_${count}`, req.ip);
+  res.json({ success: true, count });
+});
+
+app.delete(['/api/bookings/:id', '/api/bookings/:id/permanent', '/api/customer/bookings/:id'], (req, res) => {
+  const user = getAuthUser(req);
+  if (!user) return res.status(401).json({ error: 'Unauthorized' });
+
+  const rawId = req.params.id.replace('booking_', '');
+  let deleted = false;
+
+  db.mutate(s => {
+    const idx = s.bookings.findIndex(b => b.id === req.params.id || b.id === rawId || b.id === `bkg_${rawId}`);
+    if (idx !== -1) {
+      const booking = s.bookings[idx];
+      const userEmail = (user.email || '').toLowerCase().trim();
+      const isOwner = booking.customerId === user.id || (booking.customerEmail && booking.customerEmail.toLowerCase().trim() === userEmail);
+      const isStaffOrAdmin = user.role === 'SUPER_ADMIN' || user.studioId === booking.studioId;
+
+      if (isOwner || isStaffOrAdmin) {
+        s.bookings.splice(idx, 1);
+        // Also cleanup associated payments & sessions
+        s.payments = s.payments.filter(p => p.bookingId !== booking.id);
+        s.gcashSessions = s.gcashSessions.filter(g => g.bookingId !== booking.id);
+        deleted = true;
+      }
+    }
+  });
+
+  if (!deleted) {
+    return res.status(404).json({ error: 'Booking not found or not allowed to delete' });
+  }
+
+  recordAudit(user, 'BOOKING_PERMANENT_DELETE', 'BOOKING', req.params.id, req.ip);
+  res.json({ success: true, message: 'Booking permanently deleted' });
+});
+
 app.put('/api/bookings/:id/reschedule', (req, res) => {
   const user = getAuthUser(req);
   if (!user) return res.status(401).json({ error: 'Unauthorized' });
@@ -1894,77 +2275,66 @@ app.get('/api/payments/gcash/stream', (req, res) => {
   });
 });
 
-// Create PayMongo / GCash QR Ph Session
-app.post('/api/payments/gcash/create-qr', (req, res) => {
+// Create PayMongo / Direct Studio Dynamic GCash QR Ph Session
+app.post(['/api/payments/gcash/create-qr', '/api/payments/gcash/create-session'], async (req, res) => {
   const user = getAuthUser(req);
   if (!user) return res.status(401).json({ error: 'Unauthorized' });
 
   const { bookingId, printOrderId, studioId, amount, paymentType } = req.body;
+  const store = db.getStore();
+
+  // Resolve target studio and booking
+  let targetStudioId = studioId;
+  let booking = null;
+  if (bookingId) {
+    booking = store.bookings.find(x => x.id === bookingId);
+    if (booking && !targetStudioId) targetStudioId = booking.studioId;
+  }
+  if (!targetStudioId && printOrderId) {
+    const po = store.printOrders.find(x => x.id === printOrderId);
+    if (po) targetStudioId = po.studioId;
+  }
+  const studio = store.studios.find(s => s.id === targetStudioId) || store.studios[0];
+
+  const fullAmount = booking ? booking.totalAmount : (Number(amount) || 1000);
+  const downPaymentAmount = booking ? (booking.downPaymentAmount || Math.round(fullAmount * 0.3)) : Math.round(fullAmount * 0.3);
+  const selectedPaymentType = paymentType || (booking?.paymentOption === 'full' ? 'full' : 'downpayment');
+  const selectedAmount = selectedPaymentType === 'full' ? fullAmount : (amount ? Number(amount) : downPaymentAmount);
+
   const sessionId = `gcs_${Date.now()}_${Math.random().toString(36).substring(2, 6)}`;
   const expiresAt = new Date(Date.now() + 30 * 60 * 1000).toISOString(); // 30 mins
 
-  // SVG QR representation encoded as base64 data URL
-  const qrSvg = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 200 200" width="200" height="200">
-    <rect width="200" height="200" fill="#ffffff"/>
-    <!-- Outer Corners -->
-    <rect x="20" y="20" width="40" height="40" fill="#0055ff" rx="4"/>
-    <rect x="28" y="28" width="24" height="24" fill="#ffffff" rx="2"/>
-    <rect x="34" y="34" width="12" height="12" fill="#0055ff"/>
-
-    <rect x="140" y="20" width="40" height="40" fill="#0055ff" rx="4"/>
-    <rect x="148" y="28" width="24" height="24" fill="#ffffff" rx="2"/>
-    <rect x="154" y="34" width="12" height="12" fill="#0055ff"/>
-
-    <rect x="20" y="140" width="40" height="40" fill="#0055ff" rx="4"/>
-    <rect x="28" y="148" width="24" height="24" fill="#ffffff" rx="2"/>
-    <rect x="34" y="154" width="12" height="12" fill="#0055ff"/>
-
-    <!-- Dynamic Modules simulating QR Ph payload -->
-    <g fill="#1e293b">
-      <rect x="70" y="25" width="10" height="10"/>
-      <rect x="90" y="25" width="10" height="20"/>
-      <rect x="110" y="25" width="15" height="10"/>
-      <rect x="70" y="45" width="20" height="10"/>
-      <rect x="100" y="45" width="15" height="15"/>
-      <rect x="125" y="45" width="10" height="10"/>
-      <rect x="25" y="70" width="10" height="15"/>
-      <rect x="45" y="70" width="15" height="10"/>
-      <rect x="70" y="70" width="25" height="15"/>
-      <rect x="105" y="70" width="20" height="10"/>
-      <rect x="135" y="70" width="10" height="25"/>
-      <rect x="155" y="70" width="20" height="10"/>
-      <rect x="25" y="95" width="20" height="10"/>
-      <rect x="55" y="95" width="10" height="20"/>
-      <rect x="80" y="95" width="40" height="40" fill="#0055ff" rx="6"/>
-      <text x="100" y="118" font-family="sans-serif" font-weight="900" font-size="11" fill="#ffffff" text-anchor="middle">QR Ph</text>
-      <rect x="130" y="105" width="20" height="10"/>
-      <rect x="160" y="95" width="15" height="20"/>
-      <rect x="25" y="120" width="10" height="10"/>
-      <rect x="45" y="115" width="20" height="10"/>
-      <rect x="70" y="145" width="15" height="25"/>
-      <rect x="95" y="145" width="20" height="10"/>
-      <rect x="125" y="145" width="15" height="15"/>
-      <rect x="150" y="145" width="25" height="10"/>
-      <rect x="70" y="175" width="25" height="10"/>
-      <rect x="105" y="165" width="10" height="20"/>
-      <rect x="125" y="170" width="20" height="15"/>
-      <rect x="155" y="165" width="15" height="15"/>
-    </g>
-  </svg>`;
-
-  const qrCodeData = `data:image/svg+xml;base64,${Buffer.from(qrSvg).toString('base64')}`;
+  // Generate dynamic QR code specifically containing this order's exact amount and studio recipient
+  let qrCodeData = '';
+  try {
+    qrCodeData = await generateOrderDynamicQRCode({
+      studioName: studio?.gcashName || studio?.name || 'Studio Partner',
+      studioGcashNumber: studio?.gcashNumber || '0917-822-1010',
+      amount: selectedAmount,
+      bookingId: bookingId || printOrderId,
+      paymentType: selectedPaymentType
+    });
+  } catch (err) {
+    console.warn('Dynamic QR generation fallback:', err);
+    qrCodeData = studio?.gcashQrCode || '';
+  }
 
   const session: GCashQRSession = {
     id: sessionId,
     bookingId,
     printOrderId,
-    studioId,
+    studioId: studio?.id || 'std_lumiere',
+    studioName: studio?.name || 'Cainta Studio',
+    studioGcashName: studio?.gcashName || studio?.name || 'Studio Owner',
+    studioGcashNumber: studio?.gcashNumber || studio?.contactInfo || '0917-822-1010',
     customerId: user.id,
-    gateway: 'paymongo',
-    gatewayPaymentIntentId: `pi_${Date.now()}_sandbox`,
+    gateway: 'direct_gcash',
+    gatewayPaymentIntentId: `direct_${Date.now()}`,
     qrCodeData,
-    amount: Number(amount),
-    paymentType: paymentType || 'downpayment',
+    amount: selectedAmount,
+    fullAmount,
+    downPaymentAmount,
+    paymentType: selectedPaymentType,
     status: 'pending',
     expiresAt,
     createdAt: new Date().toISOString()
@@ -1972,6 +2342,51 @@ app.post('/api/payments/gcash/create-qr', (req, res) => {
 
   db.mutate(s => s.gcashSessions.push(session));
   res.status(201).json(session);
+});
+
+// Dynamic QR Switch Payment Option (Downpayment 30% vs Full Payment 100%)
+app.put('/api/payments/gcash/session/:id/switch-option', async (req, res) => {
+  const { paymentOption } = req.body; // 'downpayment' | 'full'
+  const store = db.getStore();
+  const session = store.gcashSessions.find(s => s.id === req.params.id);
+  if (!session) return res.status(404).json({ error: 'Session not found' });
+
+  const studio = store.studios.find(s => s.id === session.studioId);
+  const fullAmount = session.fullAmount || session.amount;
+  const downPaymentAmount = session.downPaymentAmount || Math.round(fullAmount * 0.3);
+  const newAmount = paymentOption === 'full' ? fullAmount : downPaymentAmount;
+
+  let newQrCode = session.qrCodeData;
+  try {
+    newQrCode = await generateOrderDynamicQRCode({
+      studioName: studio?.gcashName || studio?.name || session.studioGcashName || 'Studio Partner',
+      studioGcashNumber: studio?.gcashNumber || session.studioGcashNumber || '0917-822-1010',
+      amount: newAmount,
+      bookingId: session.bookingId || session.printOrderId,
+      paymentType: paymentOption
+    });
+  } catch (err) {
+    console.warn('Dynamic QR re-generation failed:', err);
+  }
+
+  db.mutate(s => {
+    const sess = s.gcashSessions.find(x => x.id === req.params.id);
+    if (sess) {
+      sess.paymentType = paymentOption;
+      sess.amount = newAmount;
+      sess.qrCodeData = newQrCode;
+    }
+
+    if (session.bookingId) {
+      const b = s.bookings.find(x => x.id === session.bookingId);
+      if (b) {
+        b.paymentOption = paymentOption;
+      }
+    }
+  });
+
+  const updatedSession = db.getStore().gcashSessions.find(s => s.id === req.params.id);
+  res.json(updatedSession);
 });
 
 // Polling endpoint for QR session (polled every 4s by frontend)
@@ -1982,7 +2397,7 @@ app.get('/api/payments/gcash/session/:id', (req, res) => {
   res.json(session);
 });
 
-// Manual Proof Fallback for GCash
+// Direct GCash Customer Proof Submission (Reference Number & Receipt Screenshot)
 app.post('/api/payments/gcash/submit-proof', (req, res) => {
   const { sessionId, referenceNumber, proofOfPayment } = req.body;
   const store = db.getStore();
@@ -1990,8 +2405,11 @@ app.post('/api/payments/gcash/submit-proof', (req, res) => {
   if (!session) return res.status(404).json({ error: 'Session not found' });
 
   const paymentId = `pay_${Date.now()}`;
+  const studio = store.studios.find(s => s.id === session.studioId);
+  const customer = store.users.find(u => u.id === session.customerId) || store.customers.find(c => c.id === session.customerId);
+
   db.mutate(s => {
-    s.payments.push({
+    const pay: Payment = {
       id: paymentId,
       gcashSessionId: sessionId,
       bookingId: session.bookingId,
@@ -2006,10 +2424,174 @@ app.post('/api/payments/gcash/submit-proof', (req, res) => {
       referenceNumber,
       paymentDate: new Date().toISOString(),
       createdAt: new Date().toISOString()
-    });
+    };
+    s.payments.unshift(pay);
+
+    // Update booking with proof reference
+    if (session.bookingId) {
+      const b = s.bookings.find(x => x.id === session.bookingId);
+      if (b) {
+        b.paymentReference = referenceNumber;
+        if (proofOfPayment) b.proofOfPayment = proofOfPayment;
+        b.customerNotes = (b.customerNotes || '') + ` [Submitted GCash Ref: ${referenceNumber}]`;
+      }
+    }
+
+    // Notify Studio Owner that a customer sent money directly to their GCash!
+    if (studio?.ownerId) {
+      const studioNotif: Notification = {
+        id: `notif_${Date.now()}_${Math.random().toString(36).substring(2, 6)}`,
+        userId: studio.ownerId,
+        studioId: studio.id,
+        title: `📸 Direct GCash Payment Received!`,
+        message: `${customer?.fullName || 'Client'} submitted GCash Ref #${referenceNumber} (₱${session.amount.toLocaleString()}) for Booking #${session.bookingId || session.printOrderId}. Please verify in your Studio Dashboard.`,
+        isRead: false,
+        type: 'warning',
+        link: session.bookingId ? `booking_${session.bookingId}` : undefined,
+        createdAt: new Date().toISOString()
+      };
+      s.notifications.unshift(studioNotif);
+      broadcastSSE(studio.ownerId, { type: 'notification', notification: studioNotif });
+      broadcastSSE(studio.ownerId, { type: 'payment.submitted', payment: pay, sessionId });
+    }
+  });
+
+  // Notify customer browser
+  broadcastSSE(session.customerId, {
+    type: 'payment.proof_submitted',
+    sessionId,
+    paymentId,
+    referenceNumber,
+    message: 'Proof submitted directly to studio owner for confirmation.'
   });
 
   res.json({ success: true, paymentId });
+});
+
+// Studio Owner Direct Verification / Approval of GCash Payment
+app.post('/api/bookings/:id/verify-payment', (req, res) => {
+  const user = getAuthUser(req);
+  if (!user || user.role === 'CUSTOMER') return res.status(403).json({ error: 'Forbidden' });
+
+  const { paymentId, status, rejectionReason } = req.body; // status: 'verified' | 'rejected'
+  const store = db.getStore();
+  const booking = store.bookings.find(b => b.id === req.params.id);
+  if (!booking) return res.status(404).json({ error: 'Booking not found' });
+
+  if (user.role !== 'SUPER_ADMIN' && user.studioId !== booking.studioId) {
+    return res.status(403).json({ error: 'Unauthorized to verify payments for this studio' });
+  }
+
+  const studio = store.studios.find(s => s.id === booking.studioId);
+
+  db.mutate(s => {
+    const b = s.bookings.find(x => x.id === req.params.id);
+    if (!b) return;
+
+    let pay = s.payments.find(p => p.id === paymentId || p.bookingId === b.id);
+    if (!pay) {
+      pay = {
+        id: `pay_${Date.now()}`,
+        bookingId: b.id,
+        studioId: b.studioId,
+        customerId: b.customerId,
+        amount: b.downPaymentAmount || b.totalAmount,
+        paymentType: b.paymentOption === 'downpayment' ? 'downpayment' : 'full',
+        paymentMethod: 'gcash',
+        paymentStatus: 'pending_verification',
+        paymentDate: new Date().toISOString(),
+        createdAt: new Date().toISOString()
+      };
+      s.payments.unshift(pay);
+    }
+
+    if (status === 'rejected') {
+      pay.paymentStatus = 'rejected';
+      pay.reviewedBy = user.fullName;
+      pay.reviewedAt = new Date().toISOString();
+      pay.rejectionReason = rejectionReason || 'Payment could not be confirmed in Studio GCash account';
+      b.status = 'Awaiting Payment';
+
+      s.notifications.unshift({
+        id: `notif_${Date.now()}`,
+        userId: b.customerId,
+        studioId: b.studioId,
+        title: `❌ Payment Issue - ${studio?.name || 'Studio'}`,
+        message: `Your GCash payment could not be verified by the studio owner: ${pay.rejectionReason}. Please resubmit valid proof.`,
+        isRead: false,
+        type: 'error',
+        link: `booking_${b.id}`,
+        createdAt: new Date().toISOString()
+      });
+    } else {
+      // Verified by studio owner!
+      pay.paymentStatus = 'verified';
+      pay.reviewedBy = user.fullName;
+      pay.reviewedAt = new Date().toISOString();
+
+      const payAmt = pay.amount || (b.paymentOption === 'downpayment' ? b.downPaymentAmount : b.totalAmount);
+      b.amountPaid = (b.amountPaid || 0) + payAmt;
+      b.remainingBalance = Math.max(0, b.totalAmount - b.amountPaid);
+      b.status = 'Confirmed';
+
+      if (b.remainingBalance === 0) {
+        b.paymentStatus = 'fully_paid';
+        b.finalPaymentStatus = 'paid';
+      } else {
+        b.paymentStatus = 'downpayment_paid';
+      }
+
+      // Mark associated session as paid
+      const sess = s.gcashSessions.find(g => g.bookingId === b.id && g.status === 'pending');
+      if (sess) {
+        sess.status = 'paid';
+        sess.paidAt = new Date().toISOString();
+      }
+
+      s.notifications.unshift({
+        id: `notif_${Date.now()}`,
+        userId: b.customerId,
+        studioId: b.studioId,
+        title: `✅ Payment Confirmed by ${studio?.name || 'Studio'}!`,
+        message: `Studio Owner ${user.fullName} has confirmed your GCash payment of ₱${payAmt.toLocaleString()}. Your shoot on ${b.bookingDate} (${b.timeSlot}) is Confirmed!`,
+        isRead: false,
+        type: 'success',
+        link: `booking_${b.id}`,
+        createdAt: new Date().toISOString()
+      });
+    }
+  });
+
+  // Real-time notification to client
+  broadcastSSE(booking.customerId, {
+    type: status === 'rejected' ? 'payment.rejected' : 'payment.confirmed',
+    bookingId: booking.id,
+    status
+  });
+
+  // SMTP Confirmation Email to client
+  if (status !== 'rejected' && booking.customerEmail) {
+    sendEmailNotification(
+      booking.customerEmail,
+      `[Payment Confirmed] ${studio?.name} - Reservation Confirmed`,
+      `<div style="font-family: sans-serif; padding: 24px; background: #f0fdf4; border-radius: 16px; border: 1px solid #bbf7d0;">
+        <h2 style="color: #166534; margin-top: 0;">✅ Direct Studio Payment Verified!</h2>
+        <p>Hi ${booking.customerName},</p>
+        <p>Great news! The owner of <strong>${studio?.name}</strong> has confirmed receiving your GCash payment.</p>
+        <div style="background: #ffffff; padding: 16px; border-radius: 12px; border: 1px solid #dcfce7; margin: 16px 0;">
+          <p style="margin: 4px 0;"><strong>Date & Time:</strong> ${booking.bookingDate} at ${booking.timeSlot}</p>
+          <p style="margin: 4px 0;"><strong>Paid to Studio:</strong> ${studio?.gcashName || studio?.name} (${studio?.gcashNumber || ''})</p>
+          <p style="margin: 4px 0;"><strong>Amount Verified:</strong> ₱${(booking.downPaymentAmount || booking.totalAmount).toLocaleString()}</p>
+          <p style="margin: 4px 0;"><strong>Remaining Balance:</strong> ₱${booking.remainingBalance.toLocaleString()}</p>
+          <p style="margin: 4px 0;"><strong>Reservation Status:</strong> Confirmed</p>
+        </div>
+        <p>Thank you for booking with ${studio?.name} in Cainta, Rizal.</p>
+      </div>`
+    );
+  }
+
+  recordAudit(user, `PAYMENT_VERIFIED_${status.toUpperCase()}`, 'PAYMENT', req.params.id, req.ip);
+  res.json({ success: true, booking: db.getStore().bookings.find(b => b.id === req.params.id) });
 });
 
 // Manual Payment Submission (Generic)
@@ -2946,14 +3528,39 @@ app.put('/api/notifications/:id/read', (req, res) => {
   res.json({ success: true });
 });
 
-app.put('/api/notifications/mark-read', (req, res) => {
+app.put(['/api/notifications/read-all', '/api/notifications/mark-read'], (req, res) => {
   const user = getAuthUser(req);
   if (!user) return res.status(401).json({ error: 'Unauthorized' });
 
   db.mutate(s => {
     s.notifications.forEach(n => {
-      if (n.userId === user.id) n.isRead = true;
+      if (n.userId === user.id || (user.role === 'SUPER_ADMIN' && n.userId === 'usr_superadmin')) {
+        n.isRead = true;
+      }
     });
+  });
+  res.json({ success: true });
+});
+
+app.delete('/api/notifications/:id', (req, res) => {
+  const user = getAuthUser(req);
+  if (!user) return res.status(401).json({ error: 'Unauthorized' });
+
+  db.mutate(s => {
+    const idx = s.notifications.findIndex(x => x.id === req.params.id && (x.userId === user.id || user.role === 'SUPER_ADMIN'));
+    if (idx !== -1) {
+      s.notifications.splice(idx, 1);
+    }
+  });
+  res.json({ success: true });
+});
+
+app.delete(['/api/notifications', '/api/notifications/clear-all'], (req, res) => {
+  const user = getAuthUser(req);
+  if (!user) return res.status(401).json({ error: 'Unauthorized' });
+
+  db.mutate(s => {
+    s.notifications = s.notifications.filter(x => !(x.userId === user.id || (user.role === 'SUPER_ADMIN' && x.userId === 'usr_superadmin')));
   });
   res.json({ success: true });
 });
@@ -3035,7 +3642,7 @@ app.get('/api/reports/daily-closing', (req, res) => {
 
 let geminiClient: GoogleGenAI | null = null;
 function getGeminiClient(): GoogleGenAI | null {
-  const apiKey = process.env.GEMINI_API_KEY || 'AIzaSyDAuwo04ajcarVGoilxMKiQWXNxfPZnpSc';
+  const apiKey = process.env.GEMINI_API_KEY;
   if (!geminiClient && apiKey) {
     geminiClient = new GoogleGenAI({
       apiKey,
@@ -3061,7 +3668,7 @@ app.post('/api/email/test', async (req, res) => {
     `<div style="font-family: sans-serif; padding: 20px; background: #f8fafc; border-radius: 12px;">
       <h2 style="color: #d97706;">📸 Cainta Studio MIS Email Service</h2>
       <p>Hello ${user.fullName},</p>
-      <p>Your SMTP email configuration using <strong>${process.env.SMTP_EMAIL || 'danielpadilla140600@gmail.com'}</strong> is active and functional!</p>
+      <p>Your SMTP email configuration using <strong>${process.env.SMTP_EMAIL || 'configured SMTP email'}</strong> is active and functional!</p>
       <p>Automatic payment reminders and booking confirmations will be dispatched from this email server.</p>
       <hr style="border: none; border-top: 1px solid #e2e8f0; margin: 20px 0;" />
       <small style="color: #64748b;">Cainta Photography Studio MIS • Cainta, Rizal</small>

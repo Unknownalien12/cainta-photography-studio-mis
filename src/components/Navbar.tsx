@@ -26,7 +26,6 @@ interface NavbarProps {
   unreadNotificationsCount: number;
   onOpenNotifications: () => void;
   customPages: CustomPage[];
-  onOpenQuickSwitcher: () => void;
 }
 
 export const Navbar: React.FC<NavbarProps> = ({
@@ -37,8 +36,7 @@ export const Navbar: React.FC<NavbarProps> = ({
   favoritesCount,
   unreadNotificationsCount,
   onOpenNotifications,
-  customPages,
-  onOpenQuickSwitcher
+  customPages
 }) => {
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
   const [muted, setMutedState] = useState(isSoundMuted());
@@ -191,16 +189,6 @@ export const Navbar: React.FC<NavbarProps> = ({
               </button>
             )}
 
-            {/* Role Demo Quick Switcher Button */}
-            <button
-              id="btn-demo-quick-switcher"
-              onClick={onOpenQuickSwitcher}
-              className="hidden lg:inline-flex items-center gap-1 text-xs px-2.5 py-1.5 rounded-md bg-stone-800 border border-stone-700 text-amber-300 hover:bg-stone-700 transition-colors"
-            >
-              <span>Demo Role:</span>
-              <span className="font-semibold text-white uppercase">{currentUser?.role || 'Guest'}</span>
-            </button>
-
             {/* Auth / Account Profile */}
             {currentUser ? (
               <div className="flex items-center gap-2 pl-2 border-l border-stone-700">
@@ -316,23 +304,14 @@ export const Navbar: React.FC<NavbarProps> = ({
             </button>
           )}
 
-          <div className="pt-2 border-t border-stone-800 flex justify-between items-center">
-            <button
-              onClick={() => {
-                onOpenQuickSwitcher();
-                setMobileMenuOpen(false);
-              }}
-              className="text-xs px-3 py-1.5 rounded-lg bg-stone-800 text-amber-400"
-            >
-              Switch Demo Role
-            </button>
+          <div className="pt-2 border-t border-stone-800 flex justify-end items-center">
             {currentUser ? (
               <button
                 onClick={() => {
                   onLogout();
                   setMobileMenuOpen(false);
                 }}
-                className="text-xs text-rose-400"
+                className="text-xs text-rose-400 py-1.5 px-3 rounded-lg bg-stone-800 hover:bg-stone-700"
               >
                 Sign Out ({currentUser.fullName.split(' ')[0]})
               </button>
@@ -342,7 +321,7 @@ export const Navbar: React.FC<NavbarProps> = ({
                   onNavigate('login');
                   setMobileMenuOpen(false);
                 }}
-                className="text-xs px-3 py-1.5 rounded-lg bg-amber-600 text-white font-medium"
+                className="text-xs px-3.5 py-1.5 rounded-lg bg-amber-600 hover:bg-amber-500 text-white font-medium"
               >
                 Sign In / Register
               </button>

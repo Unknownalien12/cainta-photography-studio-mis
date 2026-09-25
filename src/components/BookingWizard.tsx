@@ -19,6 +19,7 @@ import { apiRequest } from '../utils/apiClient.js';
 import { generateBookingReceiptPDF } from '../utils/pdfGenerator.js';
 import { getGoogleCalendarUrl, downloadICSFile } from '../utils/calendarSync.js';
 import { playCameraShutter } from '../utils/soundEffects.js';
+import { StudioSocialLinks } from './StudioSocialLinks.js';
 
 interface BookingWizardProps {
   isOpen: boolean;
@@ -174,16 +175,21 @@ export const BookingWizard: React.FC<BookingWizardProps> = ({
               className="w-10 h-10 rounded-xl object-cover border border-stone-700"
             />
             <div>
-              <h3 className="font-bold text-base leading-tight">Book a Session at {studio.name}</h3>
+              <div className="flex items-center gap-2 flex-wrap">
+                <h3 className="font-bold text-base leading-tight">Book a Session at {studio.name}</h3>
+              </div>
               <p className="text-xs text-amber-400">Step {step} of 5 • {studio.location}</p>
             </div>
           </div>
-          <button
-            onClick={onClose}
-            className="p-1.5 rounded-full text-stone-400 hover:text-white hover:bg-stone-800 transition-colors"
-          >
-            <X className="w-5 h-5" />
-          </button>
+          <div className="flex items-center gap-3">
+            <StudioSocialLinks studio={studio} variant="compact-icons" size="xs" />
+            <button
+              onClick={onClose}
+              className="p-1.5 rounded-full text-stone-400 hover:text-white hover:bg-stone-800 transition-colors"
+            >
+              <X className="w-5 h-5" />
+            </button>
+          </div>
         </div>
 
         {/* Progress Dots */}
@@ -599,6 +605,14 @@ export const BookingWizard: React.FC<BookingWizardProps> = ({
                 <div className="p-2.5 bg-amber-50 rounded-xl text-[11px] text-amber-900 border border-amber-200">
                   ⚡ Time slot is reserved for 24 hours. Booking automatically confirms upon downpayment.
                 </div>
+
+                {/* Studio Social Links & Official Channels */}
+                <div className="pt-2 border-t border-stone-100">
+                  <div className="text-[10px] text-stone-400 font-semibold mb-1.5 uppercase tracking-wider">
+                    Studio Official Social Pages & Website:
+                  </div>
+                  <StudioSocialLinks studio={studio} variant="badges" size="xs" />
+                </div>
               </div>
             </div>
           )}
@@ -632,6 +646,14 @@ export const BookingWizard: React.FC<BookingWizardProps> = ({
                   <span className="font-bold text-amber-700 bg-amber-100 px-2 py-0.5 rounded-full text-[10px]">
                     {completedBooking.status}
                   </span>
+                </div>
+
+                {/* Studio Connect Social Links */}
+                <div className="pt-2 mt-2 border-t border-stone-200/80">
+                  <span className="text-[10px] text-stone-500 font-semibold block mb-1">
+                    Connect with {studio.name}:
+                  </span>
+                  <StudioSocialLinks studio={studio} variant="badges" size="xs" />
                 </div>
               </div>
 

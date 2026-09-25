@@ -22,6 +22,7 @@ import { apiRequest } from '../utils/apiClient.js';
 import { Interactive3DTiltCard, MagnetButton, ScrollReveal } from '../components/MotionCard.js';
 import { PromotionsCarousel } from '../components/PromotionsCarousel.js';
 import { FAQAccordion } from '../components/FAQAccordion.js';
+import { StudioSocialLinks } from '../components/StudioSocialLinks.js';
 
 interface LandingPageProps {
   studios: Studio[];
@@ -192,6 +193,11 @@ export const LandingPage: React.FC<LandingPageProps> = ({
                             {s}
                           </span>
                         ))}
+                      </div>
+
+                      {/* Studio Social Links & Website */}
+                      <div className="pt-2 border-t border-stone-100/80">
+                        <StudioSocialLinks studio={studio} variant="badges" size="xs" />
                       </div>
                     </div>
                   </div>

@@ -11,7 +11,7 @@ import type {
   GCashQRSession,
   Booking
 } from './db/types.js';
-import { apiRequest } from './utils/apiClient.js';
+import { apiRequest, setStoredToken, getStoredUser, setStoredUser } from './utils/apiClient.js';
 import { Navbar } from './components/Navbar.js';
 import { ScrollProgressBar } from './components/MotionCard.js';
 import { Chatbot } from './components/Chatbot.js';
@@ -35,7 +35,7 @@ export function App() {
   const [pageParams, setPageParams] = useState<any>({});
 
   // Global Data
-  const [currentUser, setCurrentUser] = useState<User | null>(null);
+  const [currentUser, setCurrentUser] = useState<User | null>(() => getStoredUser());
   const [studios, setStudios] = useState<Studio[]>([]);
   const [services, setServices] = useState<Service[]>([]);
   const [packages, setPackages] = useState<Package[]>([]);
@@ -55,7 +55,6 @@ export function App() {
 
   // Modals
   const [showNotifications, setShowNotifications] = useState(false);
-  const [showQuickSwitcher, setShowQuickSwitcher] = useState(false);
 
   // Booking Wizard
   const [bookingStudio, setBookingStudio] = useState<Studio | null>(null);
@@ -75,9 +74,15 @@ export function App() {
       // 1. Session check
       try {
         const me = await apiRequest<{ user: User }>('/api/auth/me');
-        if (me && me.user) setCurrentUser(me.user);
+        if (me && me.user) {
+          setCurrentUser(me.user);
+          setStoredUser(me.user);
+        }
       } catch {
-        // Not logged in or guest
+        if (!localStorage.getItem('cainta_mis_token') && !localStorage.getItem('cainta_auth_token')) {
+          setCurrentUser(null);
+          setStoredUser(null);
+        }
       }
 
       // 2. Fetch studios, products, and CMS pages
@@ -136,10 +141,13 @@ export function App() {
   const handleLogout = async () => {
     try {
       await apiRequest('/api/auth/logout', { method: 'POST' });
-      setCurrentUser(null);
-      handleNavigate('landing');
     } catch (err) {
       console.error(err);
+    } finally {
+      setStoredToken(null);
+      setStoredUser(null);
+      setCurrentUser(null);
+      handleNavigate('landing');
     }
   };
 
@@ -152,24 +160,6 @@ export function App() {
       } catch {}
       return next;
     });
-  };
-
-  const handleSwitchDemoRole = async (role: 'CUSTOMER' | 'STUDIO_ADMIN' | 'SUPER_ADMIN') => {
-    try {
-      const res = await apiRequest<{ message: string; user: User }>('/api/auth/demo-switch', {
-        method: 'POST',
-        body: JSON.stringify({ role })
-      });
-      setCurrentUser(res.user);
-      setShowQuickSwitcher(false);
-      loadNotifications();
-
-      if (role === 'SUPER_ADMIN') handleNavigate('admin');
-      else if (role === 'STUDIO_ADMIN') handleNavigate('studio-dashboard');
-      else handleNavigate('customer');
-    } catch (err) {
-      alert('Role switch failed');
-    }
   };
 
   // Open booking wizard for selected studio
@@ -204,7 +194,9 @@ export function App() {
           method: 'POST',
           body: JSON.stringify({
             bookingId: booking.id,
+            studioId: booking.studioId,
             amount: amountToPay,
+            paymentType: paymentOption === 'downpayment' ? 'downpayment' : 'full',
             description: `Photoshoot Booking ${booking.id} - ${booking.customerName}`
           })
         });
@@ -222,7 +214,9 @@ export function App() {
         method: 'POST',
         body: JSON.stringify({
           bookingId: booking.id,
+          studioId: booking.studioId,
           amount: booking.remainingBalance,
+          paymentType: 'balance',
           description: `Remaining Balance for Booking ${booking.id}`
         })
       });
@@ -378,7 +372,6 @@ export function App() {
         unreadNotificationsCount={unreadCount}
         onOpenNotifications={() => setShowNotifications(true)}
         customPages={customPages}
-        onOpenQuickSwitcher={() => setShowQuickSwitcher(true)}
       />
 
       {/* Main View Area */}
@@ -448,16 +441,15 @@ export function App() {
           </div>
 
           <div>
-            <h5 className="font-bold text-white mb-3">Demo Testing Tools</h5>
-            <p className="text-[11px] text-stone-400 mb-3">
-              Instantly toggle access to test client, studio owner, or super-admin views:
+            <h5 className="font-bold text-white mb-3">Cainta MIS Support</h5>
+            <p className="text-[11px] text-stone-400 mb-3 leading-relaxed">
+              Para sa tulong sa account, studio registration, o mga katanungan:
             </p>
-            <button
-              onClick={() => setShowQuickSwitcher(true)}
-              className="w-full py-2 bg-stone-800 hover:bg-stone-700 text-amber-300 font-bold rounded-xl border border-stone-700 transition-colors"
-            >
-              Open Role Switcher
-            </button>
+            <div className="space-y-1.5 text-[11px] text-stone-300">
+              <div>📧 support@cainta-studios.ph</div>
+              <div>📞 (02) 8696-2847 / 0917-800-0001</div>
+              <div className="text-amber-400">Lunes - Sabado: 8:00 AM - 6:00 PM</div>
+            </div>
           </div>
         </div>
 
@@ -539,69 +531,12 @@ export function App() {
         isOpen={Boolean(gcashSession)}
         onClose={() => setGcashSession(null)}
         session={gcashSession}
-        onPaymentConfirmed={() => {
+        onPaymentConfirmed={(data) => {
           setGcashSession(null);
           loadNotifications();
+          window.dispatchEvent(new CustomEvent('booking-payment-confirmed', { detail: data }));
         }}
       />
-
-      {/* Quick Role Switcher Modal */}
-      {showQuickSwitcher && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/60 backdrop-blur-xs animate-fadeIn">
-          <div className="w-full max-w-sm bg-white rounded-3xl p-6 shadow-2xl space-y-4 animate-scaleUp">
-            <div className="flex justify-between items-center">
-              <h4 className="font-bold text-sm text-stone-900">Switch Demo Role</h4>
-              <button
-                onClick={() => setShowQuickSwitcher(false)}
-                className="text-stone-400 hover:text-stone-600 text-xs font-bold"
-              >
-                ✕
-              </button>
-            </div>
-            <p className="text-xs text-stone-500">
-              Select an account persona to explore permissions and dashboards:
-            </p>
-
-            <div className="space-y-2">
-              <button
-                onClick={() => handleSwitchDemoRole('CUSTOMER')}
-                className="w-full p-3 rounded-2xl border border-stone-200 hover:border-amber-500 hover:bg-amber-50/50 text-left transition-all group"
-              >
-                <div className="text-xs font-bold text-stone-900 group-hover:text-amber-700">
-                  Client / Customer (Maria Ramos)
-                </div>
-                <div className="text-[11px] text-stone-500">
-                  Browse directory, book slots, pay downpayments, review proofs & order prints
-                </div>
-              </button>
-
-              <button
-                onClick={() => handleSwitchDemoRole('STUDIO_ADMIN')}
-                className="w-full p-3 rounded-2xl border border-stone-200 hover:border-amber-500 hover:bg-amber-50/50 text-left transition-all group"
-              >
-                <div className="text-xs font-bold text-stone-900 group-hover:text-amber-700">
-                  Studio Owner (Lumina Art Studios Cainta)
-                </div>
-                <div className="text-[11px] text-stone-500">
-                  Manage schedule & blackouts, booking calendar, upload proofs & watermarks
-                </div>
-              </button>
-
-              <button
-                onClick={() => handleSwitchDemoRole('SUPER_ADMIN')}
-                className="w-full p-3 rounded-2xl border border-stone-200 hover:border-amber-500 hover:bg-amber-50/50 text-left transition-all group"
-              >
-                <div className="text-xs font-bold text-stone-900 group-hover:text-amber-700">
-                  Super Admin (Rizalian Admin)
-                </div>
-                <div className="text-[11px] text-stone-500">
-                  Accredit studios, review permits, manage CMS pages & system settings
-                </div>
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
     </div>
   );
 }

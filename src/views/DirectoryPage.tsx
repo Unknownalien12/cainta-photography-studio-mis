@@ -14,12 +14,14 @@ import {
   Phone,
   Mail,
   Clock,
-  ExternalLink
+  ExternalLink,
+  Globe
 } from 'lucide-react';
 import type { Studio, Service, Package, PrintProduct, Review, User } from '../db/types.js';
 import { CaintaStudioMap } from '../components/CaintaStudioMap.js';
 import { Interactive3DTiltCard } from '../components/MotionCard.js';
 import { apiRequest } from '../utils/apiClient.js';
+import { StudioSocialLinks, formatUrl } from '../components/StudioSocialLinks.js';
 
 interface DirectoryPageProps {
   studios: Studio[];
@@ -366,6 +368,11 @@ export const DirectoryPage: React.FC<DirectoryPageProps> = ({
                               </span>
                             ))}
                           </div>
+
+                          {/* Clickable Social Media & Website Badges */}
+                          <div className="pt-2 border-t border-stone-100">
+                            <StudioSocialLinks studio={studio} variant="badges" size="xs" />
+                          </div>
                         </div>
                       </div>
 
@@ -457,6 +464,11 @@ export const DirectoryPage: React.FC<DirectoryPageProps> = ({
                         <span>{studio.location}</span>
                       </p>
                       <p className="text-xs text-stone-600 line-clamp-2 leading-relaxed">{studio.description}</p>
+                      
+                      {/* Clickable Social Media & Website Badges */}
+                      <div className="pt-2 border-t border-stone-100">
+                        <StudioSocialLinks studio={studio} variant="badges" size="xs" />
+                      </div>
                     </div>
                   </div>
 
@@ -522,6 +534,16 @@ export const DirectoryPage: React.FC<DirectoryPageProps> = ({
                 </div>
 
                 <div className="flex items-center gap-2">
+                  {activeDetailStudio.website && (
+                    <a
+                      href={formatUrl(activeDetailStudio.website, 'website')}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="hidden sm:inline-flex items-center gap-1.5 px-3 py-2 rounded-xl bg-emerald-600/90 hover:bg-emerald-600 text-white text-xs font-bold border border-emerald-500 shadow-xs"
+                    >
+                      <Globe className="w-4 h-4" /> Official Website
+                    </a>
+                  )}
                   <button
                     onClick={() => {
                       const st = activeDetailStudio;
@@ -564,6 +586,11 @@ export const DirectoryPage: React.FC<DirectoryPageProps> = ({
                 <Star className="w-4 h-4 fill-amber-500 text-amber-500" />
                 <span>{activeDetailStudio.rating} ({activeDetailStudio.reviewCount} reviews)</span>
               </div>
+            </div>
+
+            {/* Studio Online Presence & Social Links Banner */}
+            <div className="px-6 py-2.5 bg-gradient-to-r from-amber-50/50 via-stone-50 to-orange-50/40 border-b border-stone-200">
+              <StudioSocialLinks studio={activeDetailStudio} variant="bar" size="sm" />
             </div>
 
             {/* Detail Tabs */}

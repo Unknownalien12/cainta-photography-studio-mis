@@ -1,8 +1,10 @@
 const TOKEN_KEY = 'cainta_mis_token';
+const AUTH_TOKEN_KEY = 'cainta_auth_token';
+const USER_KEY = 'cainta_mis_user';
 
 export function getStoredToken(): string | null {
   try {
-    return localStorage.getItem(TOKEN_KEY);
+    return localStorage.getItem(TOKEN_KEY) || localStorage.getItem(AUTH_TOKEN_KEY) || null;
   } catch {
     return null;
   }
@@ -12,8 +14,32 @@ export function setStoredToken(token: string | null) {
   try {
     if (token) {
       localStorage.setItem(TOKEN_KEY, token);
+      localStorage.setItem(AUTH_TOKEN_KEY, token);
     } else {
       localStorage.removeItem(TOKEN_KEY);
+      localStorage.removeItem(AUTH_TOKEN_KEY);
+      localStorage.removeItem(USER_KEY);
+    }
+  } catch (e) {
+    console.error('Storage error:', e);
+  }
+}
+
+export function getStoredUser(): any | null {
+  try {
+    const raw = localStorage.getItem(USER_KEY);
+    return raw ? JSON.parse(raw) : null;
+  } catch {
+    return null;
+  }
+}
+
+export function setStoredUser(user: any | null) {
+  try {
+    if (user) {
+      localStorage.setItem(USER_KEY, JSON.stringify(user));
+    } else {
+      localStorage.removeItem(USER_KEY);
     }
   } catch (e) {
     console.error('Storage error:', e);
@@ -25,6 +51,7 @@ export async function apiRequest<T = any>(
   options: RequestInit = {}
 ): Promise<T> {
   const token = getStoredToken();
+  const storedUser = getStoredUser();
   const headers: Record<string, string> = {
     'Content-Type': 'application/json',
     ...(options.headers as Record<string, string> || {})
@@ -32,6 +59,9 @@ export async function apiRequest<T = any>(
 
   if (token) {
     headers['Authorization'] = `Bearer ${token}`;
+  }
+  if (storedUser && storedUser.id) {
+    headers['X-User-Id'] = storedUser.id;
   }
 
   const response = await fetch(endpoint, {

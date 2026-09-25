@@ -31,8 +31,16 @@ import {
   Mail,
   Upload,
   X,
-  Tag
+  Tag,
+  Phone,
+  QrCode,
+  Eye,
+  Globe,
+  Share2,
+  ExternalLink,
+  Link2
 } from 'lucide-react';
+import { StudioSocialLinks, formatUrl, FacebookIcon, InstagramIcon, TikTokIcon, YouTubeIcon, TwitterIcon } from '../components/StudioSocialLinks.js';
 
 const processImageFiles = async (files: FileList | File[]): Promise<string[]> => {
   const fileArray = Array.from(files);
@@ -93,7 +101,7 @@ import {
   Cell
 } from 'recharts';
 import type { Studio, Booking, Service, Package, PrintOrder, PhotoProofing, User, StudioInventoryItem, GearStatus, Review, Notification, Promotion } from '../db/types.js';
-import { apiRequest } from '../utils/apiClient.js';
+import { apiRequest, getStoredToken } from '../utils/apiClient.js';
 import { generateSalesReportPDF, generateBookingReceiptPDF, generateStudioAnalyticsPDF, generateBookingsDateRangePDF } from '../utils/pdfGenerator.js';
 import { exportStudioAnalyticsCSV, exportBookingsDateRangeCSV } from '../utils/csvExporter.js';
 import { SystemCalendar } from '../components/SystemCalendar.js';
@@ -147,7 +155,7 @@ export const StudioDashboard: React.FC<StudioDashboardProps> = ({
       })
       .catch(() => {});
 
-    const token = localStorage.getItem('cainta_auth_token') || '';
+    const token = getStoredToken() || localStorage.getItem('cainta_auth_token') || '';
     const eventSource = new EventSource(`/api/notifications/stream?token=${encodeURIComponent(token)}`);
 
     eventSource.onmessage = (event) => {
@@ -238,7 +246,23 @@ export const StudioDashboard: React.FC<StudioDashboardProps> = ({
   const [editContact, setEditContact] = useState(studio.contactInfo);
   const [editHours, setEditHours] = useState(studio.businessHours);
   const [editDesc, setEditDesc] = useState(studio.description);
+  const [editGcashName, setEditGcashName] = useState(studio.gcashName || studio.name || '');
+  const [editGcashNumber, setEditGcashNumber] = useState(studio.gcashNumber || studio.contactInfo || '');
+  const [editGcashQrCode, setEditGcashQrCode] = useState(studio.gcashQrCode || '');
+  const [editFacebook, setEditFacebook] = useState(studio.facebook || studio.socialLinks?.facebook || '');
+  const [editWebsite, setEditWebsite] = useState(studio.website || studio.socialLinks?.website || '');
+  const [editInstagram, setEditInstagram] = useState(studio.instagram || studio.socialLinks?.instagram || '');
+  const [editTiktok, setEditTiktok] = useState(studio.tiktok || studio.socialLinks?.tiktok || '');
+  const [editYoutube, setEditYoutube] = useState(studio.youtube || studio.socialLinks?.youtube || '');
+  const [editTwitter, setEditTwitter] = useState(studio.twitter || studio.socialLinks?.twitter || '');
+  const [isUploadingQr, setIsUploadingQr] = useState(false);
+  const [verifyingBooking, setVerifyingBooking] = useState<Booking | null>(null);
+  const [isProcessingVerification, setIsProcessingVerification] = useState(false);
+  const [rejectReason, setRejectReason] = useState('');
+  const [showRejectInput, setShowRejectInput] = useState(false);
   const [savedSettingsNotice, setSavedSettingsNotice] = useState(false);
+  const [bookingFilter, setBookingFilter] = useState<'all' | 'needs_review' | 'awaiting_payment' | 'confirmed' | 'completed' | 'cancelled'>('all');
+  const [bookingSearch, setBookingSearch] = useState('');
 
   // Studio Promotion CRUD state
   const [showAddPromo, setShowAddPromo] = useState(false);
@@ -641,6 +665,39 @@ export const StudioDashboard: React.FC<StudioDashboardProps> = ({
     }
   };
 
+  const handleUploadStudioQr = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    setIsUploadingQr(true);
+    const reader = new FileReader();
+    reader.onload = () => {
+      setEditGcashQrCode(reader.result as string);
+      setIsUploadingQr(false);
+    };
+    reader.readAsDataURL(file);
+  };
+
+  const handleVerifyStudioPayment = async (bookingId: string, status: 'verified' | 'rejected') => {
+    setIsProcessingVerification(true);
+    try {
+      await apiRequest(`/api/bookings/${bookingId}/verify-payment`, {
+        method: 'POST',
+        body: JSON.stringify({
+          status,
+          rejectionReason: rejectReason || undefined
+        })
+      });
+      setVerifyingBooking(null);
+      setShowRejectInput(false);
+      setRejectReason('');
+      loadStudioData();
+    } catch (err: any) {
+      alert(err.message || 'Failed to update payment status');
+    } finally {
+      setIsProcessingVerification(false);
+    }
+  };
+
   // Save Settings
   const handleSaveStudioProfile = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -652,7 +709,24 @@ export const StudioDashboard: React.FC<StudioDashboardProps> = ({
           address: editAddress,
           contactInfo: editContact,
           businessHours: editHours,
-          description: editDesc
+          description: editDesc,
+          gcashName: editGcashName,
+          gcashNumber: editGcashNumber,
+          gcashQrCode: editGcashQrCode,
+          facebook: editFacebook.trim(),
+          website: editWebsite.trim(),
+          instagram: editInstagram.trim(),
+          tiktok: editTiktok.trim(),
+          youtube: editYoutube.trim(),
+          twitter: editTwitter.trim(),
+          socialLinks: {
+            facebook: editFacebook.trim(),
+            website: editWebsite.trim(),
+            instagram: editInstagram.trim(),
+            tiktok: editTiktok.trim(),
+            youtube: editYoutube.trim(),
+            twitter: editTwitter.trim()
+          }
         })
       });
       onUpdateStudio(updated);
@@ -1012,6 +1086,11 @@ export const StudioDashboard: React.FC<StudioDashboardProps> = ({
                 </span>
               </div>
               <p className="text-xs text-stone-400 mt-0.5">{studio.address} • {studio.businessHours}</p>
+              
+              {/* Studio Online Links Badges */}
+              <div className="mt-2">
+                <StudioSocialLinks studio={studio} variant="badges" size="xs" />
+              </div>
             </div>
           </div>
 
@@ -2014,9 +2093,63 @@ export const StudioDashboard: React.FC<StudioDashboardProps> = ({
 
           <SystemCalendar bookings={bookings} studio={studio} />
 
-          {/* Bookings table */}
+          {/* Bookings & Payment Review Section */}
           <div className="bg-white p-6 rounded-3xl border border-stone-200 shadow-sm space-y-4">
-            <h3 className="font-bold text-stone-900 text-sm">All Studio Reservations</h3>
+            <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-3 pb-2 border-b border-stone-100">
+              <div>
+                <h3 className="font-bold text-stone-900 text-base flex items-center gap-2">
+                  Studio Reservations & Payments
+                  {safeBookings.filter(b => b.paymentStatus === 'pending_verification' || b.status === 'Payment Under Review' || (Boolean(b.paymentReference) && b.amountPaid === 0 && b.status !== 'Cancelled')).length > 0 && (
+                    <span className="px-2 py-0.5 rounded-full text-[11px] font-bold bg-amber-500 text-white animate-pulse">
+                      {safeBookings.filter(b => b.paymentStatus === 'pending_verification' || b.status === 'Payment Under Review' || (Boolean(b.paymentReference) && b.amountPaid === 0 && b.status !== 'Cancelled')).length} Needs Review
+                    </span>
+                  )}
+                </h3>
+                <p className="text-xs text-stone-500">Review GCash payments, track booking lifecycle, and manage client schedules.</p>
+              </div>
+
+              {/* Search & Status Quick Filter */}
+              <div className="flex flex-wrap items-center gap-2">
+                <input
+                  type="text"
+                  placeholder="Search client, ID, ref #..."
+                  value={bookingSearch}
+                  onChange={e => setBookingSearch(e.target.value)}
+                  className="text-xs px-3 py-1.5 border border-stone-200 rounded-xl bg-stone-50 focus:bg-white focus:ring-2 focus:ring-amber-500 outline-hidden w-44"
+                />
+                <div className="flex items-center p-1 bg-stone-100 rounded-xl text-[11px] font-bold">
+                  <button
+                    type="button"
+                    onClick={() => setBookingFilter('all')}
+                    className={`px-2.5 py-1 rounded-lg transition-all ${bookingFilter === 'all' ? 'bg-white text-stone-900 shadow-xs' : 'text-stone-500 hover:text-stone-800'}`}
+                  >
+                    All ({safeBookings.length})
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setBookingFilter('needs_review')}
+                    className={`px-2.5 py-1 rounded-lg transition-all flex items-center gap-1 ${bookingFilter === 'needs_review' ? 'bg-amber-600 text-white shadow-xs' : 'text-amber-800 hover:text-amber-950 font-bold'}`}
+                  >
+                    ⚠️ Review ({safeBookings.filter(b => b.paymentStatus === 'pending_verification' || b.status === 'Payment Under Review' || (Boolean(b.paymentReference) && b.amountPaid === 0 && b.status !== 'Cancelled')).length})
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setBookingFilter('confirmed')}
+                    className={`px-2.5 py-1 rounded-lg transition-all ${bookingFilter === 'confirmed' ? 'bg-white text-stone-900 shadow-xs' : 'text-stone-500 hover:text-stone-800'}`}
+                  >
+                    Confirmed
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setBookingFilter('awaiting_payment')}
+                    className={`px-2.5 py-1 rounded-lg transition-all ${bookingFilter === 'awaiting_payment' ? 'bg-white text-stone-900 shadow-xs' : 'text-stone-500 hover:text-stone-800'}`}
+                  >
+                    Awaiting
+                  </button>
+                </div>
+              </div>
+            </div>
+
             <div className="overflow-x-auto">
               <table className="w-full text-xs text-left">
                 <thead className="bg-stone-50 text-stone-500 uppercase font-semibold text-[10px]">
@@ -2025,52 +2158,337 @@ export const StudioDashboard: React.FC<StudioDashboardProps> = ({
                     <th className="p-3">Client</th>
                     <th className="p-3">Date & Slot</th>
                     <th className="p-3">Total Amount</th>
-                    <th className="p-3">Balance</th>
-                    <th className="p-3">Status</th>
+                    <th className="p-3">Balance Due</th>
+                    <th className="p-3">GCash Payment & Proof</th>
+                    <th className="p-3">Studio Status</th>
                     <th className="p-3">Actions</th>
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-stone-100">
-                  {safeBookings.map(b => (
-                    <tr key={b.id} className="hover:bg-stone-50/50">
-                      <td className="p-3 font-mono text-[11px]">{b.id}</td>
-                      <td className="p-3 font-medium text-stone-800">
-                        <div>{b.customerName}</div>
-                        <div className="text-[10px] text-stone-400">{b.customerEmail}</div>
-                      </td>
-                      <td className="p-3 text-stone-600">
-                        {b.bookingDate} @ {b.timeSlot}
-                      </td>
-                      <td className="p-3 font-bold text-stone-900">₱{b.totalAmount.toLocaleString()}</td>
-                      <td className="p-3 font-bold text-amber-700">₱{b.remainingBalance.toLocaleString()}</td>
-                      <td className="p-3">
-                        <select
-                          value={b.status}
-                          onChange={e => handleUpdateBookingStatus(b.id, e.target.value)}
-                          className="text-xs p-1 border border-stone-300 rounded-lg bg-white"
-                        >
-                          <option value="Confirmed">Confirmed</option>
-                          <option value="Ongoing">Ongoing</option>
-                          <option value="Completed">Completed</option>
-                          <option value="Awaiting Payment">Awaiting Payment</option>
-                          <option value="Cancelled">Cancelled</option>
-                        </select>
-                      </td>
-                      <td className="p-3">
-                        <button
-                          onClick={() => generateBookingReceiptPDF(b, studio)}
-                          className="p-1 rounded text-stone-500 hover:text-stone-900 hover:bg-stone-100"
-                          title="Print Receipt"
-                        >
-                          <Download className="w-4 h-4 text-amber-600" />
-                        </button>
-                      </td>
-                    </tr>
-                  ))}
+                  {safeBookings
+                    .filter(b => {
+                      const q = bookingSearch.toLowerCase().trim();
+                      const matchSearch = !q ||
+                        b.id.toLowerCase().includes(q) ||
+                        b.customerName.toLowerCase().includes(q) ||
+                        b.customerEmail.toLowerCase().includes(q) ||
+                        (b.paymentReference && b.paymentReference.toLowerCase().includes(q));
+
+                      if (!matchSearch) return false;
+
+                      if (bookingFilter === 'needs_review') {
+                        return b.paymentStatus === 'pending_verification' ||
+                          b.status === 'Payment Under Review' ||
+                          (Boolean(b.paymentReference) && b.amountPaid === 0 && b.status !== 'Cancelled');
+                      }
+                      if (bookingFilter === 'awaiting_payment') {
+                        return b.status === 'Awaiting Payment' || (b.amountPaid === 0 && !b.paymentReference && b.status !== 'Cancelled');
+                      }
+                      if (bookingFilter === 'confirmed') {
+                        return b.status === 'Confirmed' || b.status === 'Ongoing';
+                      }
+                      if (bookingFilter === 'completed') {
+                        return b.status === 'Completed';
+                      }
+                      if (bookingFilter === 'cancelled') {
+                        return b.status === 'Cancelled';
+                      }
+                      return true;
+                    })
+                    .map(b => {
+                      const isPendingReview = b.paymentStatus === 'pending_verification' ||
+                        b.status === 'Payment Under Review' ||
+                        (Boolean(b.paymentReference) && b.amountPaid === 0 && b.status !== 'Cancelled');
+
+                      return (
+                        <tr key={b.id} className={`hover:bg-stone-50/50 ${isPendingReview ? 'bg-amber-50/30' : ''}`}>
+                          <td className="p-3 font-mono text-[11px] font-bold text-stone-700">{b.id}</td>
+                          <td className="p-3 font-medium text-stone-800">
+                            <div className="font-bold">{b.customerName}</div>
+                            <div className="text-[10px] text-stone-400">{b.customerEmail}</div>
+                            {b.customerPhone && <div className="text-[10px] text-stone-400">{b.customerPhone}</div>}
+                          </td>
+                          <td className="p-3 text-stone-600">
+                            <div className="font-semibold">{b.bookingDate}</div>
+                            <div className="text-[10px] text-stone-500">{b.timeSlot}</div>
+                          </td>
+                          <td className="p-3 font-bold text-stone-900">₱{b.totalAmount.toLocaleString()}</td>
+                          <td className="p-3 font-bold text-amber-700">₱{b.remainingBalance.toLocaleString()}</td>
+                          <td className="p-3">
+                            {isPendingReview ? (
+                              <div className="space-y-1.5">
+                                <span className="font-mono text-[10px] bg-amber-100 text-amber-900 px-2 py-0.5 rounded-md font-bold border border-amber-300 inline-block">
+                                  Ref: #{b.paymentReference || 'Receipt Submitted'}
+                                </span>
+                                <button
+                                  type="button"
+                                  onClick={() => {
+                                    setVerifyingBooking(b);
+                                    setShowRejectInput(false);
+                                    setRejectReason('');
+                                  }}
+                                  className="w-full text-[11px] font-bold text-white bg-amber-600 hover:bg-amber-500 shadow-xs px-2.5 py-1.5 rounded-lg transition-all flex items-center justify-center gap-1 cursor-pointer"
+                                >
+                                  ⚡ Review & Verify Payment
+                                </button>
+                              </div>
+                            ) : b.amountPaid > 0 ? (
+                              <div className="space-y-1">
+                                <span className="text-[10px] text-emerald-700 font-bold flex items-center gap-1">
+                                  <CheckCircle2 className="w-3.5 h-3.5 text-emerald-600 shrink-0" />
+                                  Paid: ₱{b.amountPaid.toLocaleString()}
+                                </span>
+                                {b.paymentReference && (
+                                  <span className="font-mono text-[9px] text-stone-500 block truncate max-w-[130px]">
+                                    Ref: #{b.paymentReference}
+                                  </span>
+                                )}
+                                <button
+                                  type="button"
+                                  onClick={() => {
+                                    setVerifyingBooking(b);
+                                    setShowRejectInput(false);
+                                    setRejectReason('');
+                                  }}
+                                  className="text-[10px] text-blue-600 hover:text-blue-800 font-bold underline flex items-center gap-0.5 cursor-pointer"
+                                >
+                                  <Eye className="w-3 h-3" /> View Payment Details
+                                </button>
+                              </div>
+                            ) : b.status === 'Awaiting Payment' ? (
+                              <div className="space-y-1">
+                                <span className="text-[10px] text-stone-500 block">Pending GCash transfer</span>
+                                <button
+                                  type="button"
+                                  onClick={() => {
+                                    setVerifyingBooking(b);
+                                    setShowRejectInput(false);
+                                    setRejectReason('');
+                                  }}
+                                  className="text-[10px] text-stone-700 hover:text-stone-900 underline font-bold block cursor-pointer"
+                                >
+                                  Verify / Record Manually
+                                </button>
+                              </div>
+                            ) : (
+                              <span className="text-[10px] text-stone-500 font-medium">In-Studio / Cash</span>
+                            )}
+                          </td>
+                          <td className="p-3">
+                            <select
+                              value={b.status}
+                              onChange={e => handleUpdateBookingStatus(b.id, e.target.value)}
+                              className="text-xs p-1.5 border border-stone-300 rounded-lg bg-white font-medium focus:ring-2 focus:ring-amber-500"
+                            >
+                              <option value="Confirmed">Confirmed</option>
+                              <option value="Ongoing">Ongoing (In Session)</option>
+                              <option value="Completed">Completed</option>
+                              <option value="Awaiting Payment">Awaiting Payment</option>
+                              <option value="Cancelled">Cancelled</option>
+                            </select>
+                          </td>
+                          <td className="p-3">
+                            <button
+                              onClick={() => generateBookingReceiptPDF(b, studio)}
+                              className="p-1.5 rounded-lg text-stone-500 hover:text-stone-900 hover:bg-stone-100 flex items-center gap-1 font-semibold text-[10px] border border-stone-200"
+                              title="Print Official Studio Receipt"
+                            >
+                              <Download className="w-3.5 h-3.5 text-amber-600" /> Receipt
+                            </button>
+                          </td>
+                        </tr>
+                      );
+                    })}
                 </tbody>
               </table>
+              {safeBookings.length === 0 && (
+                <div className="text-center py-10 text-stone-400 text-xs">
+                  No bookings found.
+                </div>
+              )}
             </div>
           </div>
+
+          {/* Studio Owner Direct Payment Verification Modal */}
+          {verifyingBooking && (
+            <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/60 backdrop-blur-sm animate-fadeIn">
+              <div className="bg-white rounded-3xl max-w-lg w-full p-6 shadow-2xl border border-stone-200 space-y-4 animate-scaleUp max-h-[90vh] overflow-y-auto">
+                <div className="flex items-start justify-between border-b border-stone-100 pb-3">
+                  <div>
+                    <span className="text-[10px] font-bold text-amber-700 uppercase tracking-wider block">
+                      Direct Studio Payment Verification
+                    </span>
+                    <h4 className="font-bold text-base text-stone-900">
+                      {verifyingBooking.amountPaid > 0 ? 'Payment Details & Proof' : 'Review & Confirm GCash Payment'}
+                    </h4>
+                  </div>
+                  <button
+                    onClick={() => setVerifyingBooking(null)}
+                    className="p-1 text-stone-400 hover:text-stone-700 rounded-lg text-lg leading-none"
+                  >
+                    ✕
+                  </button>
+                </div>
+
+                {/* Status Callout */}
+                {verifyingBooking.amountPaid > 0 ? (
+                  <div className="p-3.5 bg-emerald-50 rounded-2xl border border-emerald-200 text-xs text-emerald-950 flex items-center justify-between">
+                    <div className="flex items-center gap-2">
+                      <CheckCircle2 className="w-5 h-5 text-emerald-600 shrink-0" />
+                      <div>
+                        <span className="font-bold block">Payment Already Verified & Recorded</span>
+                        <span className="text-emerald-800 text-[11px]">Paid: ₱{verifyingBooking.amountPaid.toLocaleString()} | Balance Due: ₱{verifyingBooking.remainingBalance.toLocaleString()}</span>
+                      </div>
+                    </div>
+                  </div>
+                ) : (
+                  <div className="p-3.5 bg-blue-50/90 rounded-2xl border border-blue-200 text-xs text-blue-950 space-y-1.5">
+                    <div className="font-bold flex items-center gap-1.5">
+                      <Phone className="w-4 h-4 text-[#0055ff]" /> How to Verify in Your GCash:
+                    </div>
+                    <p className="text-[11px] text-blue-800 leading-relaxed">
+                      1. Open your GCash app (Studio GCash: <strong>{studio.gcashNumber || '0917-822-1010'}</strong> - <strong>{studio.gcashName || studio.name}</strong>).<br />
+                      2. Check transaction history for incoming transfer of <strong>₱{(verifyingBooking.downPaymentAmount || Math.round(verifyingBooking.totalAmount * 0.3)).toLocaleString()}</strong>.<br />
+                      3. Match Reference Number <strong>#{verifyingBooking.paymentReference || 'N/A'}</strong>.
+                    </p>
+                  </div>
+                )}
+
+                {/* Client Booking Information */}
+                <div className="bg-stone-50 p-3.5 rounded-2xl border border-stone-200 text-xs space-y-2">
+                  <div className="flex justify-between">
+                    <span className="text-stone-500">Client Name:</span>
+                    <span className="font-bold text-stone-900">{verifyingBooking.customerName}</span>
+                  </div>
+                  <div className="flex justify-between">
+                    <span className="text-stone-500">Contact / Email:</span>
+                    <span className="font-medium text-stone-800">{verifyingBooking.customerPhone || verifyingBooking.customerEmail}</span>
+                  </div>
+                  <div className="flex justify-between">
+                    <span className="text-stone-500">Schedule:</span>
+                    <span className="font-medium text-stone-800">{verifyingBooking.bookingDate} @ {verifyingBooking.timeSlot}</span>
+                  </div>
+                  <div className="flex justify-between pt-1 border-t border-stone-200">
+                    <span className="text-stone-500">Payment Option:</span>
+                    <span className="font-bold text-stone-900 capitalize">{verifyingBooking.paymentOption || '30% Downpayment'}</span>
+                  </div>
+                  <div className="flex justify-between">
+                    <span className="text-stone-700 font-bold">Total Service Fee:</span>
+                    <span className="font-bold text-stone-900">₱{verifyingBooking.totalAmount.toLocaleString()}</span>
+                  </div>
+                  <div className="flex justify-between">
+                    <span className="text-stone-700 font-bold">Downpayment Due:</span>
+                    <span className="text-sm font-black text-amber-700">
+                      ₱{(verifyingBooking.downPaymentAmount || Math.round(verifyingBooking.totalAmount * 0.3)).toLocaleString()}
+                    </span>
+                  </div>
+                  <div className="flex justify-between items-center bg-white p-2.5 rounded-xl border border-stone-200">
+                    <span className="text-stone-600 font-semibold text-[11px]">GCash Reference No:</span>
+                    <span className="font-mono font-bold text-xs bg-blue-50 text-blue-800 px-2 py-0.5 rounded border border-blue-200">
+                      {verifyingBooking.paymentReference || 'Direct Transfer / No Ref Entered'}
+                    </span>
+                  </div>
+                </div>
+
+                {/* Proof of Payment Screenshot Preview */}
+                {verifyingBooking.proofOfPayment && (
+                  <div className="space-y-1.5">
+                    <label className="block text-[11px] font-bold text-stone-700">
+                      Client Uploaded Receipt / Screenshot:
+                    </label>
+                    <div className="p-2 bg-stone-100 rounded-2xl border border-stone-200 flex justify-center">
+                      <img
+                        src={verifyingBooking.proofOfPayment}
+                        alt="GCash Receipt"
+                        className="max-h-56 rounded-xl object-contain shadow-xs"
+                      />
+                    </div>
+                  </div>
+                )}
+
+                {/* Rejection input toggle */}
+                {showRejectInput && (
+                  <div className="space-y-1 animate-fadeIn">
+                    <label className="block text-[11px] font-bold text-rose-700">
+                      Reason for Rejection (sent to customer):
+                    </label>
+                    <input
+                      type="text"
+                      placeholder="e.g. Reference number not found in GCash statement"
+                      value={rejectReason}
+                      onChange={e => setRejectReason(e.target.value)}
+                      className="w-full text-xs p-2.5 border border-rose-300 rounded-xl bg-rose-50/50 focus:ring-2 focus:ring-rose-500"
+                    />
+                  </div>
+                )}
+
+                {/* Modal Action Buttons */}
+                <div className="flex items-center gap-2 pt-2 border-t border-stone-100">
+                  {!showRejectInput ? (
+                    <>
+                      {verifyingBooking.amountPaid === 0 ? (
+                        <>
+                          <button
+                            type="button"
+                            onClick={() => setShowRejectInput(true)}
+                            className="px-4 py-2.5 rounded-xl text-rose-700 hover:bg-rose-50 font-bold text-xs border border-rose-200 transition-colors"
+                          >
+                            Reject
+                          </button>
+                          <button
+                            type="button"
+                            disabled={isProcessingVerification}
+                            onClick={() => handleVerifyStudioPayment(verifyingBooking.id, 'verified')}
+                            className="flex-1 py-2.5 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-white font-bold text-xs shadow-md shadow-emerald-600/20 disabled:opacity-50 transition-all flex items-center justify-center gap-1.5 cursor-pointer"
+                          >
+                            <CheckCircle2 className="w-4 h-4" />
+                            {isProcessingVerification ? 'Confirming...' : 'Confirm & Approve Payment'}
+                          </button>
+                        </>
+                      ) : (
+                        <div className="flex items-center gap-2 w-full">
+                          <button
+                            type="button"
+                            onClick={() => {
+                              generateBookingReceiptPDF(verifyingBooking, studio);
+                            }}
+                            className="px-4 py-2.5 rounded-xl bg-stone-100 hover:bg-stone-200 text-stone-800 font-bold text-xs flex items-center gap-1.5"
+                          >
+                            <Download className="w-3.5 h-3.5 text-amber-600" /> Print PDF Receipt
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => setVerifyingBooking(null)}
+                            className="flex-1 py-2.5 rounded-xl bg-stone-900 hover:bg-stone-800 text-white font-bold text-xs"
+                          >
+                            Close
+                          </button>
+                        </div>
+                      )}
+                    </>
+                  ) : (
+                    <>
+                      <button
+                        type="button"
+                        onClick={() => setShowRejectInput(false)}
+                        className="px-3 py-2 rounded-xl text-stone-600 hover:bg-stone-100 text-xs font-semibold"
+                      >
+                        Back
+                      </button>
+                      <button
+                        type="button"
+                        disabled={isProcessingVerification}
+                        onClick={() => handleVerifyStudioPayment(verifyingBooking.id, 'rejected')}
+                        className="flex-1 py-2.5 rounded-xl bg-rose-600 hover:bg-rose-500 text-white font-bold text-xs shadow-md shadow-rose-600/20 disabled:opacity-50 transition-all cursor-pointer"
+                      >
+                        {isProcessingVerification ? 'Rejecting...' : 'Confirm Rejection'}
+                      </button>
+                    </>
+                  )}
+                </div>
+              </div>
+            </div>
+          )}
         </div>
       )}
 
@@ -2864,6 +3282,313 @@ export const StudioDashboard: React.FC<StudioDashboardProps> = ({
               className="w-full text-xs p-2.5 border border-stone-300 rounded-xl font-bold text-amber-700"
             />
             <p className="text-[11px] text-stone-400 mt-1">Sets the target gross revenue goal tracked by executive summary progress indicators.</p>
+          </div>
+
+          {/* Direct Studio GCash Payment Receiver Settings */}
+          <div className="p-4 bg-gradient-to-r from-blue-50/80 to-indigo-50/50 rounded-2xl border border-blue-200 space-y-3.5">
+            <div className="flex items-center gap-2.5">
+              <div className="w-8 h-8 rounded-xl bg-[#0055ff] text-white flex items-center justify-center font-black text-sm shadow-xs">
+                G
+              </div>
+              <div>
+                <h4 className="font-bold text-xs text-blue-950">Direct Studio GCash Receiver Settings</h4>
+                <p className="text-[11px] text-blue-800">
+                  Customer downpayments & bookings will pay directly to your personal or merchant GCash account.
+                </p>
+              </div>
+            </div>
+
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+              <div>
+                <label className="block text-[11px] font-semibold text-stone-700 mb-1">
+                  GCash Registered Name
+                </label>
+                <input
+                  type="text"
+                  placeholder="e.g. Carlos Mendoza (Lumiere Photo)"
+                  value={editGcashName}
+                  onChange={e => setEditGcashName(e.target.value)}
+                  className="w-full text-xs p-2.5 bg-white border border-stone-300 rounded-xl focus:ring-2 focus:ring-[#0055ff]"
+                />
+              </div>
+              <div>
+                <label className="block text-[11px] font-semibold text-stone-700 mb-1">
+                  GCash Mobile Number
+                </label>
+                <input
+                  type="text"
+                  placeholder="e.g. 0917-822-1010"
+                  value={editGcashNumber}
+                  onChange={e => setEditGcashNumber(e.target.value)}
+                  className="w-full text-xs p-2.5 bg-white border border-stone-300 rounded-xl focus:ring-2 focus:ring-[#0055ff]"
+                />
+              </div>
+            </div>
+
+            {/* QR Code Upload */}
+            <div className="space-y-1.5">
+              <label className="block text-[11px] font-semibold text-stone-700">
+                Upload Studio QR Ph / GCash QR Image
+              </label>
+              <div className="flex items-center gap-4 bg-white p-3 rounded-xl border border-stone-200">
+                {editGcashQrCode ? (
+                  <div className="relative">
+                    <img
+                      src={editGcashQrCode}
+                      alt="Studio QR"
+                      className="w-20 h-20 object-contain rounded-lg border border-stone-200 bg-stone-50"
+                    />
+                    <button
+                      type="button"
+                      onClick={() => setEditGcashQrCode('')}
+                      className="absolute -top-1.5 -right-1.5 bg-rose-600 text-white rounded-full p-0.5 shadow-sm"
+                      title="Remove QR"
+                    >
+                      <X className="w-3 h-3" />
+                    </button>
+                  </div>
+                ) : (
+                  <div className="w-20 h-20 rounded-lg border-2 border-dashed border-stone-300 flex flex-col items-center justify-center text-stone-400 text-[10px] text-center p-1 bg-stone-50">
+                    <QrCode className="w-5 h-5 mb-0.5 text-stone-400" />
+                    <span>No custom QR</span>
+                  </div>
+                )}
+                <div className="flex-1 space-y-1">
+                  <input
+                    type="file"
+                    accept="image/*"
+                    onChange={handleUploadStudioQr}
+                    className="text-xs text-stone-600 file:mr-2 file:py-1 file:px-2.5 file:rounded-lg file:border-0 file:text-xs file:font-semibold file:bg-blue-100 file:text-blue-800 hover:file:bg-blue-200 cursor-pointer"
+                  />
+                  <p className="text-[10px] text-stone-500">
+                    Save your QR code from the GCash App (Profile &gt; My QR &gt; Download) and upload here.
+                  </p>
+                </div>
+              </div>
+            </div>
+          </div>
+
+          {/* Official Website & Social Media Channels Section */}
+          <div className="p-5 bg-gradient-to-br from-stone-50 via-amber-50/20 to-orange-50/30 rounded-2xl border border-stone-200 space-y-4">
+            <div className="flex items-start justify-between gap-3">
+              <div className="flex items-center gap-2.5">
+                <div className="w-8 h-8 rounded-xl bg-amber-600 text-white flex items-center justify-center font-bold shadow-xs">
+                  <Globe className="w-4 h-4" />
+                </div>
+                <div>
+                  <h4 className="font-bold text-xs text-stone-900">Official Website & Social Media Channels</h4>
+                  <p className="text-[11px] text-stone-500">
+                    Connect your Facebook page, website, Instagram, and TikTok. Links are clickable and redirect clients from your studio cards & bookings.
+                  </p>
+                </div>
+              </div>
+              <span className="text-[10px] font-bold text-amber-800 bg-amber-100 px-2 py-0.5 rounded-full whitespace-nowrap">
+                Public Redirects
+              </span>
+            </div>
+
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3.5 pt-1">
+              {/* Facebook Page */}
+              <div className="space-y-1">
+                <label className="flex items-center justify-between text-[11px] font-semibold text-stone-700">
+                  <span className="flex items-center gap-1.5 text-[#1877F2]">
+                    <FacebookIcon className="w-3.5 h-3.5" /> Facebook Page Link
+                  </span>
+                  {editFacebook.trim() && (
+                    <a
+                      href={formatUrl(editFacebook, 'facebook')}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="text-[10px] text-[#1877F2] hover:underline flex items-center gap-0.5 font-bold"
+                    >
+                      Test Link <ExternalLink className="w-2.5 h-2.5" />
+                    </a>
+                  )}
+                </label>
+                <div className="relative">
+                  <input
+                    type="text"
+                    placeholder="https://facebook.com/yourstudioname"
+                    value={editFacebook}
+                    onChange={e => setEditFacebook(e.target.value)}
+                    className="w-full text-xs p-2.5 pl-3 bg-white border border-stone-300 rounded-xl focus:ring-2 focus:ring-[#1877F2] focus:border-[#1877F2]"
+                  />
+                </div>
+                <p className="text-[10px] text-stone-400">Direct link to your official Facebook business page.</p>
+              </div>
+
+              {/* Official Website */}
+              <div className="space-y-1">
+                <label className="flex items-center justify-between text-[11px] font-semibold text-stone-700">
+                  <span className="flex items-center gap-1.5 text-emerald-700">
+                    <Globe className="w-3.5 h-3.5" /> Official Studio Website
+                  </span>
+                  {editWebsite.trim() && (
+                    <a
+                      href={formatUrl(editWebsite, 'website')}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="text-[10px] text-emerald-700 hover:underline flex items-center gap-0.5 font-bold"
+                    >
+                      Test Link <ExternalLink className="w-2.5 h-2.5" />
+                    </a>
+                  )}
+                </label>
+                <div className="relative">
+                  <input
+                    type="text"
+                    placeholder="https://yourstudioname.ph or yoursite.com"
+                    value={editWebsite}
+                    onChange={e => setEditWebsite(e.target.value)}
+                    className="w-full text-xs p-2.5 pl-3 bg-white border border-stone-300 rounded-xl focus:ring-2 focus:ring-emerald-500 focus:border-emerald-500"
+                  />
+                </div>
+                <p className="text-[10px] text-stone-400">Your custom domain, portfolio, or landing page.</p>
+              </div>
+
+              {/* Instagram Profile */}
+              <div className="space-y-1">
+                <label className="flex items-center justify-between text-[11px] font-semibold text-stone-700">
+                  <span className="flex items-center gap-1.5 text-pink-700">
+                    <InstagramIcon className="w-3.5 h-3.5" /> Instagram Account
+                  </span>
+                  {editInstagram.trim() && (
+                    <a
+                      href={formatUrl(editInstagram, 'instagram')}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="text-[10px] text-pink-700 hover:underline flex items-center gap-0.5 font-bold"
+                    >
+                      Test Link <ExternalLink className="w-2.5 h-2.5" />
+                    </a>
+                  )}
+                </label>
+                <input
+                  type="text"
+                  placeholder="https://instagram.com/yourhandle or @yourhandle"
+                  value={editInstagram}
+                  onChange={e => setEditInstagram(e.target.value)}
+                  className="w-full text-xs p-2.5 bg-white border border-stone-300 rounded-xl focus:ring-2 focus:ring-pink-500 focus:border-pink-500"
+                />
+                <p className="text-[10px] text-stone-400">Showcase your photo portfolio feed.</p>
+              </div>
+
+              {/* TikTok Account */}
+              <div className="space-y-1">
+                <label className="flex items-center justify-between text-[11px] font-semibold text-stone-700">
+                  <span className="flex items-center gap-1.5 text-stone-900">
+                    <TikTokIcon className="w-3.5 h-3.5" /> TikTok Profile
+                  </span>
+                  {editTiktok.trim() && (
+                    <a
+                      href={formatUrl(editTiktok, 'tiktok')}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="text-[10px] text-stone-900 hover:underline flex items-center gap-0.5 font-bold"
+                    >
+                      Test Link <ExternalLink className="w-2.5 h-2.5" />
+                    </a>
+                  )}
+                </label>
+                <input
+                  type="text"
+                  placeholder="https://tiktok.com/@yourhandle or @yourhandle"
+                  value={editTiktok}
+                  onChange={e => setEditTiktok(e.target.value)}
+                  className="w-full text-xs p-2.5 bg-white border border-stone-300 rounded-xl focus:ring-2 focus:ring-stone-700"
+                />
+                <p className="text-[10px] text-stone-400">Behind-the-scenes & viral shoot clips.</p>
+              </div>
+
+              {/* YouTube Channel */}
+              <div className="space-y-1">
+                <label className="flex items-center justify-between text-[11px] font-semibold text-stone-700">
+                  <span className="flex items-center gap-1.5 text-rose-700">
+                    <YouTubeIcon className="w-3.5 h-3.5" /> YouTube Channel
+                  </span>
+                  {editYoutube.trim() && (
+                    <a
+                      href={formatUrl(editYoutube, 'youtube')}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="text-[10px] text-rose-700 hover:underline flex items-center gap-0.5 font-bold"
+                    >
+                      Test Link <ExternalLink className="w-2.5 h-2.5" />
+                    </a>
+                  )}
+                </label>
+                <input
+                  type="text"
+                  placeholder="https://youtube.com/@yourchannel"
+                  value={editYoutube}
+                  onChange={e => setEditYoutube(e.target.value)}
+                  className="w-full text-xs p-2.5 bg-white border border-stone-300 rounded-xl focus:ring-2 focus:ring-rose-500"
+                />
+                <p className="text-[10px] text-stone-400">Wedding films & studio video showcase.</p>
+              </div>
+
+              {/* Twitter / X */}
+              <div className="space-y-1">
+                <label className="flex items-center justify-between text-[11px] font-semibold text-stone-700">
+                  <span className="flex items-center gap-1.5 text-stone-800">
+                    <TwitterIcon className="w-3.5 h-3.5" /> X (Twitter) Handle
+                  </span>
+                  {editTwitter.trim() && (
+                    <a
+                      href={formatUrl(editTwitter, 'twitter')}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="text-[10px] text-stone-800 hover:underline flex items-center gap-0.5 font-bold"
+                    >
+                      Test Link <ExternalLink className="w-2.5 h-2.5" />
+                    </a>
+                  )}
+                </label>
+                <input
+                  type="text"
+                  placeholder="https://x.com/yourhandle or @yourhandle"
+                  value={editTwitter}
+                  onChange={e => setEditTwitter(e.target.value)}
+                  className="w-full text-xs p-2.5 bg-white border border-stone-300 rounded-xl focus:ring-2 focus:ring-stone-600"
+                />
+                <p className="text-[10px] text-stone-400">Announcements & quick updates.</p>
+              </div>
+            </div>
+
+            {/* Live Interactive Link Preview for Studio Owner */}
+            <div className="p-3.5 bg-white rounded-xl border border-stone-200/80 shadow-2xs space-y-2">
+              <div className="flex items-center justify-between">
+                <span className="text-[11px] font-bold text-stone-700 flex items-center gap-1.5">
+                  <Share2 className="w-3.5 h-3.5 text-amber-600" /> Live Customer Card Buttons Preview
+                </span>
+                <span className="text-[10px] text-emerald-700 font-semibold bg-emerald-50 px-2 py-0.5 rounded-full border border-emerald-200">
+                  Clickable & Auto-formatted
+                </span>
+              </div>
+              
+              {Boolean(editFacebook.trim() || editWebsite.trim() || editInstagram.trim() || editTiktok.trim() || editYoutube.trim() || editTwitter.trim()) ? (
+                <div className="pt-1">
+                  <StudioSocialLinks
+                    facebook={editFacebook}
+                    website={editWebsite}
+                    instagram={editInstagram}
+                    tiktok={editTiktok}
+                    youtube={editYoutube}
+                    twitter={editTwitter}
+                    variant="badges"
+                    size="sm"
+                    stopClickPropagation={false}
+                  />
+                  <p className="text-[10px] text-stone-400 mt-2">
+                    💡 Click any button above to test that it opens your social page correctly in a new tab.
+                  </p>
+                </div>
+              ) : (
+                <div className="text-[11px] text-stone-400 italic py-1">
+                  No social or website links entered yet. Fill out the fields above to see live clickable badges here.
+                </div>
+              )}
+            </div>
           </div>
 
           <div>
