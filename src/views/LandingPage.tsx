@@ -210,14 +210,16 @@ export const LandingPage: React.FC<LandingPageProps> = ({
 
                     <div className="flex items-center gap-2">
                       <button
-                        onClick={() => onNavigate('directory', { selectedStudioId: studio.id })}
-                        className="text-xs px-4 py-2.5 rounded-xl border border-stone-300 text-stone-700 hover:bg-stone-50 font-semibold transition-colors"
+                        id={`btn-landing-profile-${studio.id}`}
+                        onClick={() => onNavigate('studio-profile', { studioId: studio.id })}
+                        className="text-xs px-4 py-2.5 rounded-xl border border-stone-300 text-stone-700 hover:bg-stone-50 font-semibold transition-colors cursor-pointer"
                       >
-                        Details
+                        Profile
                       </button>
                       <button
+                        id={`btn-landing-book-${studio.id}`}
                         onClick={() => onOpenBooking(studio)}
-                        className="text-xs px-4 py-2.5 rounded-xl bg-amber-600 hover:bg-amber-700 text-white font-bold shadow-md shadow-amber-600/20 transition-all"
+                        className="text-xs px-4 py-2.5 rounded-xl bg-amber-600 hover:bg-amber-700 text-white font-bold shadow-md shadow-amber-600/20 transition-all cursor-pointer"
                       >
                         Book Slot
                       </button>

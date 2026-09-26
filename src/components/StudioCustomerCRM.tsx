@@ -38,6 +38,7 @@ import type {
   CRMNoteCategory
 } from '../db/types.js';
 import { apiRequest } from '../utils/apiClient.js';
+import { toast } from '../utils/toast.js';
 
 interface StudioCustomerCRMProps {
   studio: Studio;
@@ -284,6 +285,7 @@ export const StudioCustomerCRM: React.FC<StudioCustomerCRMProps> = ({
       });
 
       setNewNoteText('');
+      toast.success('Naitala ang client consultation note!', { title: 'CRM Note Added' });
       setCrmToast('Client note recorded successfully!');
       setTimeout(() => setCrmToast(null), 3500);
     } catch (err: any) {
@@ -320,6 +322,7 @@ export const StudioCustomerCRM: React.FC<StudioCustomerCRMProps> = ({
       });
 
       setNewNoteText('');
+      toast.info('Nai-save ang note sa local CRM cache.', { title: 'CRM Note Saved' });
       setCrmToast('Client note saved locally!');
       setTimeout(() => setCrmToast(null), 3500);
     } finally {
@@ -358,10 +361,12 @@ export const StudioCustomerCRM: React.FC<StudioCustomerCRMProps> = ({
         };
       });
 
+      toast.success('Tinanggal ang note mula sa client history.', { title: 'Note Deleted' });
       setCrmToast('Client note removed.');
       setTimeout(() => setCrmToast(null), 3000);
-    } catch (err) {
+    } catch (err: any) {
       console.error('Error deleting note:', err);
+      toast.error('Nabigo ang pagbura ng note.');
     }
   };
 
@@ -398,7 +403,7 @@ export const StudioCustomerCRM: React.FC<StudioCustomerCRMProps> = ({
     link.click();
     document.body.removeChild(link);
     URL.revokeObjectURL(url);
-
+    toast.success(`Matagumpay na na-export ang ${list.length} CRM client records sa CSV!`, { title: 'CSV Exported' });
     setCrmToast('Client CRM roster exported as CSV!');
     setTimeout(() => setCrmToast(null), 3500);
   };

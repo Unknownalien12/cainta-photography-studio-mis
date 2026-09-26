@@ -3,6 +3,7 @@ import { X, Upload, Image as ImageIcon, ChevronRight, ChevronLeft, CheckCircle2,
 import type { Studio, PrintProduct, User, PrintOrder } from '../db/types.js';
 import { apiRequest } from '../utils/apiClient.js';
 import { playCameraShutter } from '../utils/soundEffects.js';
+import { toast } from '../utils/toast.js';
 
 interface PrintOrderWizardProps {
   isOpen: boolean;
@@ -44,6 +45,7 @@ export const PrintOrderWizard: React.FC<PrintOrderWizardProps> = ({
     const reader = new FileReader();
     reader.onload = () => {
       setUploadedPhoto(reader.result as string);
+      toast.success(`Nai-upload ang photo: "${file.name}"!`, { title: 'Photo Ready' });
     };
     reader.readAsDataURL(file);
   };
@@ -55,7 +57,9 @@ export const PrintOrderWizard: React.FC<PrintOrderWizardProps> = ({
     }
 
     if (!uploadedPhoto) {
-      setErrorMsg('Please upload a photo for printing');
+      const msg = 'Paki-upload ang larawan na nais mong i-print';
+      setErrorMsg(msg);
+      toast.warning(msg, { title: 'Photo Required' });
       return;
     }
 
@@ -81,9 +85,14 @@ export const PrintOrderWizard: React.FC<PrintOrderWizardProps> = ({
 
       setCompletedOrder(order);
       setStep(5);
+      toast.success(`Matagumpay na naipasa ang iyong print order (#${order.id})!`, {
+        title: 'Order Placed'
+      });
       onOrderComplete(order, paymentMethod);
     } catch (err: any) {
-      setErrorMsg(err.message || 'Failed to place print order');
+      const msg = err.message || 'Nabigo ang pag-order ng prints';
+      setErrorMsg(msg);
+      toast.error(msg, { title: 'Order Failed' });
     } finally {
       setIsSubmitting(false);
     }

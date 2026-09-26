@@ -194,13 +194,9 @@ export const Navbar: React.FC<NavbarProps> = ({
               <div className="flex items-center gap-2 pl-2 border-l border-stone-700">
                 <button
                   id="btn-user-profile"
-                  onClick={() => {
-                    if (currentUser.role === 'SUPER_ADMIN') onNavigate('admin');
-                    else if (currentUser.role === 'STUDIO_ADMIN' || currentUser.role === 'STUDIO_STAFF')
-                      onNavigate('studio-dashboard');
-                    else onNavigate('customer');
-                  }}
+                  onClick={() => onNavigate('profile')}
                   className="flex items-center gap-2 text-left hover:opacity-90"
+                  title="View Account Profile"
                 >
                   <div className="w-8 h-8 rounded-full bg-amber-600/30 border border-amber-500/50 flex items-center justify-center text-amber-300 font-semibold text-xs">
                     {currentUser.fullName.charAt(0)}

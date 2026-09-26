@@ -16,6 +16,7 @@ import {
 } from 'lucide-react';
 import type { Studio, Booking, AutomatedReminderLog, StudioReminderSettings, ReminderCheckResult } from '../db/types.js';
 import { apiRequest } from '../utils/apiClient.js';
+import { toast } from '../utils/toast.js';
 
 interface StudioPaymentReminderServiceProps {
   studio: Studio;
@@ -81,10 +82,15 @@ export const StudioPaymentReminderService: React.FC<StudioPaymentReminderService
       setLastScanResult(res);
       await loadReminderData();
       onRefreshBookings();
-      setNotice(`Scan complete! Dispatched ${res.remindersSent.length} automated payment reminder(s).`);
+      const count = res.remindersSent.length;
+      toast.success(count > 0 ? `Naipadala ang ${count} automated payment reminder(s)!` : 'Walang kailangang padalhan ng reminder sa ngayon.', {
+        title: 'Reminder Scan'
+      });
+      setNotice(`Scan complete! Dispatched ${count} automated payment reminder(s).`);
       setTimeout(() => setNotice(null), 5000);
-    } catch (err) {
+    } catch (err: any) {
       console.error('Failed to run reminder scan:', err);
+      toast.error(err.message || 'Nabigo ang pag-scan ng reminders', { title: 'Scan Error' });
     } finally {
       setIsScanning(false);
     }
@@ -97,10 +103,12 @@ export const StudioPaymentReminderService: React.FC<StudioPaymentReminderService
       });
       await loadReminderData();
       onRefreshBookings();
+      toast.success(`Naipadala ang reminder para sa Booking #${bookingId}!`, { title: 'Reminder Sent' });
       setNotice('Reminder successfully dispatched to client!');
       setTimeout(() => setNotice(null), 4000);
-    } catch (err) {
+    } catch (err: any) {
       console.error('Failed to send reminder:', err);
+      toast.error(err.message || 'Nabigo ang pagpadala ng reminder', { title: 'Send Error' });
     }
   };
 
@@ -115,10 +123,12 @@ export const StudioPaymentReminderService: React.FC<StudioPaymentReminderService
         }
       );
       setSettings(res.settings);
+      toast.success('Nai-save ang auto-reminder scheduling rules!', { title: 'Settings Saved' });
       setNotice('Reminder daemon settings saved successfully!');
       setTimeout(() => setNotice(null), 4000);
-    } catch (err) {
+    } catch (err: any) {
       console.error('Failed to save settings:', err);
+      toast.error(err.message || 'Nabigo ang pag-save ng settings', { title: 'Save Error' });
     }
   };
 

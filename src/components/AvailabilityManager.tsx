@@ -2,6 +2,7 @@ import React, { useState, useEffect } from 'react';
 import { Clock, Calendar, Plus, Trash2, CheckCircle2 } from 'lucide-react';
 import type { StudioAvailability, AvailabilityBlackout } from '../db/types.js';
 import { apiRequest } from '../utils/apiClient.js';
+import { toast } from '../utils/toast.js';
 
 interface AvailabilityManagerProps {
   studioId: string;
@@ -79,10 +80,13 @@ export const AvailabilityManager: React.FC<AvailabilityManagerProps> = ({ studio
         )
       );
       setSavedNotice(true);
+      toast.success('Nai-save ang operating hours at slot availability ng iyong studio!', {
+        title: 'Schedule Updated'
+      });
       setTimeout(() => setSavedNotice(false), 3000);
       loadData();
-    } catch (err) {
-      alert('Failed to update availability schedule');
+    } catch (err: any) {
+      toast.error(err.message || 'Nabigo ang pag-update ng schedule', { title: 'Schedule Error' });
     }
   };
 
@@ -101,8 +105,9 @@ export const AvailabilityManager: React.FC<AvailabilityManagerProps> = ({ studio
       setBlackouts(prev => [...prev, res]);
       setNewDate('');
       setNewReason('');
-    } catch (err) {
-      alert('Failed to add blackout date');
+      toast.success(`Na-block ang petsa (${newDate}) para sa "${newReason}"!`, { title: 'Blackout Added' });
+    } catch (err: any) {
+      toast.error(err.message || 'Nabigo ang pag-block ng petsa', { title: 'Blackout Error' });
     }
   };
 
@@ -112,8 +117,9 @@ export const AvailabilityManager: React.FC<AvailabilityManagerProps> = ({ studio
         method: 'DELETE'
       });
       setBlackouts(prev => prev.filter(b => b.id !== id));
-    } catch (err) {
-      alert('Failed to remove blackout');
+      toast.success('Naibalik sa open status ang petsa.', { title: 'Blackout Removed' });
+    } catch (err: any) {
+      toast.error(err.message || 'Nabigo ang pag-alis ng blackout', { title: 'Delete Error' });
     }
   };
 

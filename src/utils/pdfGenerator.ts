@@ -29,30 +29,30 @@ export function generateBookingReceiptPDF(booking: Booking, studio?: Studio) {
 
   doc.setFontSize(10);
   doc.setFont('helvetica', 'normal');
-  doc.text(`Studio: ${studio?.name || 'Accredited Cainta Studio'}`, 14, 55);
-  doc.text(`Location: ${studio?.address || 'Cainta, Rizal'}`, 14, 61);
-  doc.text(`Contact: ${studio?.contactInfo || studio?.email || 'cainta-studios.ph'}`, 14, 67);
+  doc.text(`Studio: ${studio?.name || 'Accredited Cainta Studio'}`, 14, 55, { maxWidth: 90 });
+  doc.text(`Location: ${studio?.address || 'Cainta, Rizal'}`, 14, 61, { maxWidth: 90 });
+  doc.text(`Contact: ${studio?.contactInfo || studio?.email || 'cainta-studios.ph'}`, 14, 69, { maxWidth: 90 });
 
   doc.setFont('helvetica', 'bold');
-  doc.text('Client Information', 120, 48);
+  doc.text('Client Information', 115, 48);
   doc.setFont('helvetica', 'normal');
-  doc.text(`Client Name: ${booking.customerName}`, 120, 55);
-  doc.text(`Email: ${booking.customerEmail}`, 120, 61);
-  doc.text(`Phone: ${booking.customerPhone || 'N/A'}`, 120, 67);
+  doc.text(`Client Name: ${booking.customerName}`, 115, 55, { maxWidth: 85 });
+  doc.text(`Email: ${booking.customerEmail}`, 115, 61, { maxWidth: 85 });
+  doc.text(`Phone: ${booking.customerPhone || 'N/A'}`, 115, 69, { maxWidth: 85 });
 
   // Divider
   doc.setDrawColor(220, 220, 220);
-  doc.line(14, 74, 196, 74);
+  doc.line(14, 78, 196, 78);
 
   // Reservation details
   doc.setFont('helvetica', 'bold');
-  doc.text('Booking Summary', 14, 82);
+  doc.text('Booking Summary', 14, 85);
 
   doc.setFont('helvetica', 'normal');
-  doc.text(`Booking Reference ID: ${booking.id}`, 14, 90);
-  doc.text(`Scheduled Date: ${booking.bookingDate}`, 14, 97);
-  doc.text(`Time Slot: ${booking.timeSlot}`, 14, 104);
-  doc.text(`Status: ${booking.status}`, 14, 111);
+  doc.text(`Booking Reference ID: ${booking.id}`, 14, 92);
+  doc.text(`Scheduled Date: ${booking.bookingDate}`, 14, 99);
+  doc.text(`Time Slot: ${booking.timeSlot}`, 14, 106);
+  doc.text(`Status: ${booking.status}`, 14, 113);
 
   // Financial Table
   doc.setFillColor(245, 245, 245);
@@ -130,15 +130,15 @@ export function generatePrintReceiptPDF(order: PrintOrder, studio?: Studio) {
 
   doc.setFontSize(10);
   doc.setFont('helvetica', 'normal');
-  doc.text(`Studio: ${studio?.name || 'Accredited Cainta Studio'}`, 14, 55);
-  doc.text(`Location: ${studio?.address || 'Cainta, Rizal'}`, 14, 61);
+  doc.text(`Studio: ${studio?.name || 'Accredited Cainta Studio'}`, 14, 55, { maxWidth: 90 });
+  doc.text(`Location: ${studio?.address || 'Cainta, Rizal'}`, 14, 61, { maxWidth: 90 });
 
   doc.setFont('helvetica', 'bold');
-  doc.text('Order Details', 120, 48);
+  doc.text('Order Details', 115, 48);
   doc.setFont('helvetica', 'normal');
-  doc.text(`Order ID: ${order.id}`, 120, 55);
-  doc.text(`Date: ${new Date(order.createdAt).toLocaleDateString()}`, 120, 61);
-  doc.text(`Status: ${order.status.toUpperCase()}`, 120, 67);
+  doc.text(`Order ID: ${order.id}`, 115, 55, { maxWidth: 85 });
+  doc.text(`Date: ${new Date(order.createdAt).toLocaleDateString()}`, 115, 61, { maxWidth: 85 });
+  doc.text(`Status: ${order.status.toUpperCase()}`, 115, 69, { maxWidth: 85 });
 
   // Divider
   doc.setDrawColor(220, 220, 220);

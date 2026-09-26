@@ -23,6 +23,7 @@ import {
 import type { GCashQRSession } from '../db/types.js';
 import { apiRequest } from '../utils/apiClient.js';
 import { playPaymentSuccessSound } from '../utils/soundEffects.js';
+import { toast } from '../utils/toast.js';
 
 interface GCashQRModalProps {
   isOpen: boolean;
@@ -137,6 +138,7 @@ export const GCashQRModal: React.FC<GCashQRModalProps> = ({
     const cleanNum = num.replace(/[^0-9]/g, '');
     navigator.clipboard.writeText(cleanNum);
     setCopiedNumber(true);
+    toast.info(`Nai-kopya ang GCash number: ${cleanNum}`, { title: 'Copied' });
     setTimeout(() => setCopiedNumber(false), 2000);
   };
 
@@ -152,6 +154,9 @@ export const GCashQRModal: React.FC<GCashQRModalProps> = ({
         body: JSON.stringify({ paymentOption: option })
       });
       setActiveSession(updated);
+      toast.info(`Na-update ang amount sa ${option === 'downpayment' ? '30% Downpayment' : '100% Full Payment'}!`, {
+        title: 'Option Changed'
+      });
     } catch (err: any) {
       console.warn('Switch option request failed, calculating locally:', err);
       const full = activeSession.fullAmount || activeSession.amount;
@@ -162,6 +167,7 @@ export const GCashQRModal: React.FC<GCashQRModalProps> = ({
         paymentType: option,
         amount: newAmt
       } : null);
+      toast.info(`Na-update ang amount sa ${option === 'downpayment' ? '30% Downpayment' : '100% Full Payment'}!`);
     } finally {
       setIsSwitchingOption(false);
     }
@@ -176,8 +182,11 @@ export const GCashQRModal: React.FC<GCashQRModalProps> = ({
         method: 'POST',
         body: JSON.stringify({ sessionId: activeSession.id })
       });
+      toast.success('Nai-simulate ang GCash payment! Kinukumpirma ang reservation...', { title: 'Test Payment' });
     } catch (err: any) {
-      setErrorMsg(err.message || 'Webhook simulation error');
+      const msg = err.message || 'Webhook simulation error';
+      setErrorMsg(msg);
+      toast.error(msg, { title: 'Simulation Error' });
     } finally {
       setIsSimulating(false);
     }
@@ -189,6 +198,7 @@ export const GCashQRModal: React.FC<GCashQRModalProps> = ({
     const reader = new FileReader();
     reader.onload = () => {
       setManualProofFile(reader.result as string);
+      toast.info('Naka-attach na ang screenshot ng resibo.', { title: 'Receipt Attached' });
     };
     reader.readAsDataURL(file);
   };
@@ -210,8 +220,13 @@ export const GCashQRModal: React.FC<GCashQRModalProps> = ({
       });
       setIsPendingReview(true);
       playPaymentSuccessSound();
+      toast.success(`Naisumite na ang iyong GCash Reference #${manualRef.trim()} sa studio owner!`, {
+        title: 'Proof Submitted'
+      });
     } catch (err: any) {
-      setErrorMsg(err.message || 'Failed to submit payment proof');
+      const msg = err.message || 'Nabigo ang pag-submit ng payment proof';
+      setErrorMsg(msg);
+      toast.error(msg, { title: 'Submission Error' });
     } finally {
       setSubmittingManual(false);
     }

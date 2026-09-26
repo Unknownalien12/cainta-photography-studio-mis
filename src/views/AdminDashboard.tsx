@@ -20,6 +20,7 @@ import {
 } from 'lucide-react';
 import type { Studio, User, CustomPage, SystemSetting, AuditLog, Promotion, FAQ } from '../db/types.js';
 import { apiRequest } from '../utils/apiClient.js';
+import { toast } from '../utils/toast.js';
 
 interface AdminDashboardProps {
   currentUser: User;
@@ -121,10 +122,11 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ currentUser, onR
         method: 'PUT',
         body: JSON.stringify({ status })
       });
+      toast.success(`Na-update ang accreditation status sa "${status}"!`, { title: 'Studio Status Updated' });
       loadAdminData();
       onRefreshStudios();
-    } catch (err) {
-      alert('Failed to update studio approval');
+    } catch (err: any) {
+      toast.error(err.message || 'Nabigo ang pag-update sa studio approval', { title: 'Approval Error' });
     }
   };
 
@@ -146,17 +148,20 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ currentUser, onR
       setShowNewPage(false);
       setNewTitle('');
       setNewContent('');
-    } catch (err) {
-      alert('Failed to create page');
+      toast.success(`Nagawa at nai-publish ang custom page: "${p.title}"!`, { title: 'CMS Page Created' });
+    } catch (err: any) {
+      toast.error(err.message || 'Nabigo ang paggawa ng page', { title: 'CMS Error' });
     }
   };
 
   const handleDeletePage = async (id: string) => {
+    if (!confirm('Sigurado ka bang nais mong burahin ang CMS page na ito?')) return;
     try {
       await apiRequest(`/api/admin/pages/${id}`, { method: 'DELETE' });
       setPages(prev => prev.filter(p => p.id !== id));
-    } catch (err) {
-      alert('Failed to delete page');
+      toast.success('Nabura ang custom page mula sa system.', { title: 'Page Deleted' });
+    } catch (err: any) {
+      toast.error(err.message || 'Nabigo ang pagbura ng page', { title: 'Delete Error' });
     }
   };
 
@@ -181,17 +186,20 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ currentUser, onR
       setPromoTitle('');
       setPromoCode('');
       setPromoDesc('');
-    } catch (err) {
-      alert('Failed to create promotion');
+      toast.success(`Nai-save ang sitewide promotion: "${p.title}"!`, { title: 'Promotion Published' });
+    } catch (err: any) {
+      toast.error(err.message || 'Nabigo ang pag-save ng promotion', { title: 'Promo Error' });
     }
   };
 
   const handleDeletePromo = async (id: string) => {
+    if (!confirm('Sigurado ka bang nais mong burahin ang promo banner na ito?')) return;
     try {
       await apiRequest(`/api/promotions/${id}`, { method: 'DELETE' });
       setPromotions(prev => prev.filter(p => p.id !== id));
-    } catch (err) {
-      alert('Failed to delete promotion');
+      toast.success('Nabura ang promo banner.', { title: 'Promo Deleted' });
+    } catch (err: any) {
+      toast.error(err.message || 'Nabigo ang pagbura sa promo', { title: 'Delete Error' });
     }
   };
 
@@ -210,17 +218,20 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ currentUser, onR
       setShowNewFaq(false);
       setFaqQuestion('');
       setFaqAnswer('');
-    } catch (err) {
-      alert('Failed to create FAQ');
+      toast.success(`Naidagdag ang bagong FAQ item: "${f.question.slice(0, 30)}..."!`, { title: 'FAQ Added' });
+    } catch (err: any) {
+      toast.error(err.message || 'Nabigo ang pagdagdag ng FAQ', { title: 'FAQ Error' });
     }
   };
 
   const handleDeleteFaq = async (id: string) => {
+    if (!confirm('Sigurado ka bang nais mong burahin ang FAQ na ito?')) return;
     try {
       await apiRequest(`/api/faqs/${id}`, { method: 'DELETE' });
       setFaqs(prev => prev.filter(f => f.id !== id));
-    } catch (err) {
-      alert('Failed to delete FAQ');
+      toast.success('Nabura ang FAQ item.', { title: 'FAQ Deleted' });
+    } catch (err: any) {
+      toast.error(err.message || 'Nabigo ang pagbura sa FAQ', { title: 'Delete Error' });
     }
   };
 

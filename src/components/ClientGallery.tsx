@@ -2,6 +2,7 @@ import React, { useState } from 'react';
 import { Star, MessageSquare, Send, CheckCircle2, ExternalLink, ShieldAlert, Upload } from 'lucide-react';
 import type { PhotoProofing, User } from '../db/types.js';
 import { apiRequest } from '../utils/apiClient.js';
+import { toast } from '../utils/toast.js';
 
 interface ClientGalleryProps {
   proofing: PhotoProofing;
@@ -28,7 +29,14 @@ export const ClientGallery: React.FC<ClientGalleryProps> = ({
   // Toggle favorite photo (Customer)
   const toggleStar = (photoId: string) => {
     setPhotos(prev =>
-      prev.map(p => (p.id === photoId ? { ...p, isStarred: !p.isStarred } : p))
+      prev.map(p => {
+        if (p.id === photoId) {
+          const nextVal = !p.isStarred;
+          if (nextVal) toast.info('Minarkahan bilang paboritong shot ⭐');
+          return { ...p, isStarred: nextVal };
+        }
+        return p;
+      })
     );
   };
 
@@ -50,10 +58,13 @@ export const ClientGallery: React.FC<ClientGalleryProps> = ({
         })
       });
       setSavedNotice(true);
+      toast.success('Matagumpay na naipasa ang iyong mga napiling litrato at notes sa studio!', {
+        title: 'Selections Submitted'
+      });
       setTimeout(() => setSavedNotice(false), 3000);
       onUpdate({ ...proofing, photos, status: 'selections_submitted' });
-    } catch (err) {
-      alert('Failed to submit selections');
+    } catch (err: any) {
+      toast.error(err.message || 'Nabigo ang pagpasa ng mga napiling litrato', { title: 'Submission Error' });
     } finally {
       setIsSaving(false);
     }
@@ -68,9 +79,12 @@ export const ClientGallery: React.FC<ClientGalleryProps> = ({
         method: 'PUT',
         body: JSON.stringify({ finalDriveLink })
       });
+      toast.success('Naipasa ang High-Res Google Drive download link sa client!', {
+        title: 'Photos Delivered'
+      });
       onUpdate({ ...proofing, finalDriveLink, status: 'delivered' });
-    } catch (err) {
-      alert('Failed to deliver final link');
+    } catch (err: any) {
+      toast.error(err.message || 'Nabigo ang pag-deliver ng download link', { title: 'Delivery Error' });
     } finally {
       setIsSaving(false);
     }
@@ -92,11 +106,16 @@ export const ClientGallery: React.FC<ClientGalleryProps> = ({
       };
       const updatedPhotos = [...photos, newPhoto];
       setPhotos(updatedPhotos);
-      await apiRequest(`/api/photo-proofing/${proofing.id}/photos`, {
-        method: 'PUT',
-        body: JSON.stringify({ photos: updatedPhotos })
-      });
-      onUpdate({ ...proofing, photos: updatedPhotos });
+      try {
+        await apiRequest(`/api/photo-proofing/${proofing.id}/photos`, {
+          method: 'PUT',
+          body: JSON.stringify({ photos: updatedPhotos })
+        });
+        toast.success(`Naidagdag ang "${file.name}" sa proofing gallery!`, { title: 'Photo Uploaded' });
+        onUpdate({ ...proofing, photos: updatedPhotos });
+      } catch (err: any) {
+        toast.error('Nabigo ang pag-upload ng photo.');
+      }
     };
     reader.readAsDataURL(file);
   };

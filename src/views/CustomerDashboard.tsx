@@ -24,6 +24,8 @@ import {
 } from 'lucide-react';
 import type { Booking, PrintOrder, PhotoProofing, Studio, User, Review } from '../db/types.js';
 import { apiRequest, getStoredToken } from '../utils/apiClient.js';
+import { toast } from '../utils/toast.js';
+import { ActionStatusBadge } from '../components/ActionStatus.js';
 import { generateBookingReceiptPDF, generatePrintReceiptPDF } from '../utils/pdfGenerator.js';
 import { getGoogleCalendarUrl, downloadICSFile } from '../utils/calendarSync.js';
 import { ClientGallery } from '../components/ClientGallery.js';
@@ -169,7 +171,9 @@ export const CustomerDashboard: React.FC<CustomerDashboardProps> = ({
     e.preventDefault();
     if (!reviewBooking) return;
     if (!reviewComment.trim()) {
-      alert('Please write a brief comment describing your experience.');
+      toast.warning('Pakiusap maglagay ng maikling komento tungkol sa iyong karanasan.', {
+        title: 'Kailangan ng Komento'
+      });
       return;
     }
     setIsSubmittingReview(true);
@@ -183,23 +187,28 @@ export const CustomerDashboard: React.FC<CustomerDashboardProps> = ({
           comment: reviewComment.trim()
         })
       });
-      alert('Thank you! Your feedback has been published.');
+      toast.success('Maraming salamat! Nai-publish na ang iyong review at feedback.', {
+        title: 'Review Naipasa'
+      });
       setReviewBooking(null);
       loadCustomerData();
     } catch (err: any) {
-      alert(err.message || 'Failed to submit review');
+      toast.error(err.message || 'Nabigo ang pagpasa ng review. Subukan muli.', {
+        title: 'Review Error'
+      });
     } finally {
       setIsSubmittingReview(false);
     }
   };
 
   const handleCancelBooking = async (bookingId: string) => {
-    if (!window.confirm('Are you sure you want to cancel this booking?')) return;
+    if (!window.confirm('Sigurado ka bang nais mong kanselahin ang photoshoot booking na ito?')) return;
     try {
       await apiRequest(`/api/bookings/${bookingId}/cancel`, { method: 'PUT' });
+      toast.info('Matagumpay na nakansela ang booking.', { title: 'Booking Cancelled' });
       await loadCustomerData();
-    } catch (err) {
-      alert('Failed to cancel booking');
+    } catch (err: any) {
+      toast.error(err?.message || 'Nabigo ang pag-cancel ng booking', { title: 'Cancellation Error' });
     }
   };
 
@@ -210,16 +219,19 @@ export const CustomerDashboard: React.FC<CustomerDashboardProps> = ({
         method: 'PUT',
         body: JSON.stringify({ archived })
       });
+      toast.success(archived ? 'Inilipat sa Archive ang reservation.' : 'Matagumpay na naibalik ang reservation sa Active list!', {
+        title: archived ? 'Archived' : 'Restored'
+      });
       await loadCustomerData();
     } catch (err: any) {
-      alert(err.message || 'Failed to update archive status');
+      toast.error(err.message || 'Nabigo ang pag-update sa archive status', { title: 'Archive Error' });
     } finally {
       setIsProcessingAction(false);
     }
   };
 
   const handleArchiveAllCancelled = async () => {
-    if (!window.confirm('Archive all cancelled bookings? You can access them anytime in the Archived tab or delete them permanently.')) return;
+    if (!window.confirm('I-archive ang lahat ng cancelled bookings? Maaari mo itong tingnan anumang oras sa Archive tab.')) return;
     setIsProcessingAction(true);
     try {
       const res: any = await apiRequest('/api/customer/bookings/archive-all-cancelled', {
@@ -227,25 +239,30 @@ export const CustomerDashboard: React.FC<CustomerDashboardProps> = ({
       });
       await loadCustomerData();
       if (res?.count) {
-        alert(`Successfully archived ${res.count} cancelled reservation(s).`);
+        toast.success(`Matagumpay na na-archive ang ${res.count} cancelled reservation(s).`, {
+          title: 'Archive All'
+        });
+      } else {
+        toast.info('Walang nadagdag na na-archive.');
       }
     } catch (err: any) {
-      alert(err.message || 'Failed to archive cancelled bookings');
+      toast.error(err.message || 'Nabigo ang pag-archive ng cancelled bookings', { title: 'Archive Error' });
     } finally {
       setIsProcessingAction(false);
     }
   };
 
   const handleDeleteBookingPermanently = async (bookingId: string) => {
-    if (!window.confirm('⚠️ Are you sure you want to PERMANENTLY delete this booking record? This action cannot be undone.')) return;
+    if (!window.confirm('⚠️ Sigurado ka bang nais mong burahin nang permanente ang reservation record na ito? Hindi na ito maibabalik.')) return;
     setIsProcessingAction(true);
     try {
       await apiRequest(`/api/bookings/${bookingId}/permanent`, {
         method: 'DELETE'
       });
+      toast.success('Permanenteng nabura ang booking record sa system.', { title: 'Deleted' });
       await loadCustomerData();
     } catch (err: any) {
-      alert(err.message || 'Failed to delete booking permanently');
+      toast.error(err.message || 'Nabigo ang pagbura sa booking record', { title: 'Delete Error' });
     } finally {
       setIsProcessingAction(false);
     }

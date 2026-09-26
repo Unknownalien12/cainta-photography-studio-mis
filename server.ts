@@ -632,26 +632,89 @@ app.put('/api/auth/account', (req, res) => {
   res.json({ user: updated });
 });
 
-app.post('/api/auth/forgot-password', (req, res) => {
+const passwordResetTokens = new Map<string, { email: string; expiresAt: number }>();
+
+app.post('/api/auth/forgot-password', async (req, res) => {
   const { email } = req.body;
-  // Simulated OTP for immediate UX testing
-  const mockOtp = '849201';
-  res.json({ success: true, message: `A 6-digit OTP code has been sent to ${email}`, debugOtp: mockOtp });
+  if (!email || !email.includes('@')) {
+    return res.status(400).json({ error: 'Valid email address is required' });
+  }
+
+  const normalizedEmail = email.trim().toLowerCase();
+  const store = db.getStore();
+  const user = store.users.find(u => u.email.toLowerCase() === normalizedEmail);
+
+  const resetToken = crypto.randomBytes(32).toString('hex');
+  const expiresAt = Date.now() + 60 * 60 * 1000; // 1 hour expiry
+  passwordResetTokens.set(resetToken, { email: normalizedEmail, expiresAt });
+
+  if (user) {
+    const emailHtml = `
+      <div style="font-family:sans-serif; padding:20px; color:#333; max-width:600px; margin:auto; border:1px solid #e5e7eb; border-radius:12px;">
+        <h2 style="color:#d97706; margin-top:0;">Cainta Photography Studio MIS</h2>
+        <p>Hello <b>${user.fullName}</b>,</p>
+        <p>You requested a password reset for your account. Use the secure reset token below to update your password:</p>
+        <div style="background:#f3f4f6; padding:15px; border-radius:8px; font-family:monospace; font-size:16px; font-weight:bold; color:#1f2937; margin:15px 0; word-break:break-all;">
+          ${resetToken}
+        </div>
+        <p>This token expires in 1 hour. If you did not request this, please ignore this email.</p>
+        <p style="font-size:12px; color:#6b7280; margin-top:30px;">Cainta Studio MIS • Rizal Province</p>
+      </div>
+    `;
+    await sendEmailNotification(user.email, 'Password Reset Token - Cainta Studio MIS', emailHtml);
+  }
+
+  res.json({
+    success: true,
+    message: `Kung rehistrado ang email na ito, may naipadala nang password reset token sa ${normalizedEmail}.`,
+    debugToken: resetToken
+  });
 });
 
 app.post('/api/auth/verify-reset-otp', (req, res) => {
   const { email, otp } = req.body;
+  const record = passwordResetTokens.get(otp);
+  if (record && record.email.toLowerCase() === (email || '').trim().toLowerCase() && record.expiresAt >= Date.now()) {
+    return res.json({ success: true, resetToken: otp });
+  }
   if (otp === '849201' || otp === '123456') {
     const resetToken = crypto.randomBytes(16).toString('hex');
     return res.json({ success: true, resetToken });
   }
-  return res.status(400).json({ error: 'Invalid or expired OTP code' });
+  return res.status(400).json({ error: 'Invalid or expired reset token / OTP code' });
 });
 
 app.post('/api/auth/reset-password', (req, res) => {
   const { resetToken, newPassword } = req.body;
-  if (!resetToken || !newPassword) return res.status(400).json({ error: 'Missing token or password' });
-  res.json({ success: true, message: 'Password updated successfully. You can now log in.' });
+  if (!resetToken || !newPassword) {
+    return res.status(400).json({ error: 'Reset token and new password are required' });
+  }
+
+  if (newPassword.length < 6) {
+    return res.status(400).json({ error: 'Password must be at least 6 characters long' });
+  }
+
+  const record = passwordResetTokens.get(resetToken);
+  if (!record || record.expiresAt < Date.now()) {
+    return res.status(400).json({ error: 'Invalid or expired password reset token' });
+  }
+
+  const store = db.getStore();
+  const user = store.users.find(u => u.email.toLowerCase() === record.email);
+  if (!user) {
+    return res.status(404).json({ error: 'User account not found' });
+  }
+
+  const newHash = hashPassword(newPassword);
+  db.mutate(s => {
+    const u = s.users.find(x => x.id === user.id);
+    if (u) u.passwordHash = newHash;
+  });
+
+  passwordResetTokens.delete(resetToken);
+  recordAudit(user, 'PASSWORD_RESET', 'USER', user.id, req.ip);
+
+  res.json({ success: true, message: 'Password has been successfully reset. You can now sign in with your new password.' });
 });
 
 // ==========================================

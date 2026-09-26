@@ -1,6 +1,7 @@
 import React, { useState } from 'react';
 import { Mail, Copy, Check, Sparkles, Send, User, Calendar, DollarSign, CheckCircle2 } from 'lucide-react';
 import type { Studio, Booking } from '../db/types.js';
+import { toast } from '../utils/toast.js';
 
 interface StudioEmailTemplatesProps {
   studio: Studio;
@@ -110,6 +111,9 @@ ${studio.name} Print Fulfillment Center`
     const textToCopy = `Subject: ${currentTemplate.subject}\n\n${currentTemplate.body}`;
     navigator.clipboard.writeText(textToCopy);
     setCopied(true);
+    toast.success(`Nai-kopya sa clipboard ang email template para sa "${currentTemplate.subject.slice(0, 32)}..."!`, {
+      title: 'Email Copied'
+    });
     setTimeout(() => setCopied(false), 3000);
   };
 

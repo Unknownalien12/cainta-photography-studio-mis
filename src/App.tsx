@@ -12,6 +12,8 @@ import type {
   Booking
 } from './db/types.js';
 import { apiRequest, setStoredToken, getStoredUser, setStoredUser } from './utils/apiClient.js';
+import { toast } from './utils/toast.js';
+import { ToastContainer } from './components/Toast.js';
 import { Navbar } from './components/Navbar.js';
 import { ScrollProgressBar } from './components/MotionCard.js';
 import { Chatbot } from './components/Chatbot.js';
@@ -29,6 +31,8 @@ import { StudioDashboard } from './views/StudioDashboard.js';
 import { AdminDashboard } from './views/AdminDashboard.js';
 import { AuthPage } from './views/AuthPage.js';
 import { CustomPageView } from './views/CustomPageView.js';
+import { ProfileView } from './views/ProfileView.js';
+import { StudioProfileView } from './views/StudioProfileView.js';
 
 export function App() {
   const [currentPage, setCurrentPage] = useState<string>('landing');
@@ -47,9 +51,9 @@ export function App() {
   // Local Favorites
   const [favorites, setFavorites] = useState<string[]>(() => {
     try {
-      return JSON.parse(localStorage.getItem('cainta_studio_favorites') || '["studio_1"]');
+      return JSON.parse(localStorage.getItem('cainta_studio_favorites') || '[]');
     } catch {
-      return ['studio_1'];
+      return [];
     }
   });
 
@@ -141,8 +145,10 @@ export function App() {
   const handleLogout = async () => {
     try {
       await apiRequest('/api/auth/logout', { method: 'POST' });
+      toast.info('Matagumpay kang naka-log out. Hanggang sa muli!', { title: 'Naka-log Out' });
     } catch (err) {
       console.error(err);
+      toast.info('Naka-log out na sa lokal na session.', { title: 'Naka-log Out' });
     } finally {
       setStoredToken(null);
       setStoredUser(null);
@@ -155,6 +161,13 @@ export function App() {
     setFavorites(prev => {
       const exists = prev.includes(studioId);
       const next = exists ? prev.filter(id => id !== studioId) : [...prev, studioId];
+      const studio = studios.find(s => s.id === studioId);
+      const studioName = studio?.name || 'Studio';
+      if (exists) {
+        toast.info(`Tinanggal ang "${studioName}" sa iyong mga paborito.`, { title: 'Paborito' });
+      } else {
+        toast.success(`Idinagdag ang "${studioName}" sa iyong mga paborito! ❤️`, { title: 'Paborito' });
+      }
       try {
         localStorage.setItem('cainta_studio_favorites', JSON.stringify(next));
       } catch {}
@@ -186,6 +199,9 @@ export function App() {
     paymentMethod: string
   ) => {
     loadNotifications();
+    toast.success(`Matagumpay na naitala ang iyong photoshoot booking (#${booking.id})!`, {
+      title: 'Booking Confirmed'
+    });
     if (paymentMethod === 'gcash') {
       try {
         const amountToPay =
@@ -201,8 +217,11 @@ export function App() {
           })
         });
         setGcashSession(session);
-      } catch (err) {
+      } catch (err: any) {
         console.error('GCash session error:', err);
+        toast.error('Hindi ma-generate ang GCash QR code: ' + (err?.message || 'Subukan muli'), {
+          title: 'Payment Error'
+        });
       }
     }
   };
@@ -221,8 +240,10 @@ export function App() {
         })
       });
       setGcashSession(session);
-    } catch (err) {
-      alert('Failed to initiate GCash payment');
+    } catch (err: any) {
+      toast.error('Hindi ma-proseso ang GCash session: ' + (err?.message || 'Error sa pag-bayad'), {
+        title: 'GCash Error'
+      });
     }
   };
 
@@ -253,6 +274,7 @@ export function App() {
           onToggleFavorite={toggleFavorite}
           initialSelectedStudioId={pageParams?.selectedStudioId}
           currentUser={currentUser}
+          onNavigate={handleNavigate}
         />
       );
     }
@@ -336,6 +358,35 @@ export function App() {
       );
     }
 
+    if (currentPage === 'profile') {
+      return (
+        <ProfileView
+          currentUser={currentUser}
+          onNavigate={handleNavigate}
+          onUpdateUser={u => setCurrentUser(u)}
+        />
+      );
+    }
+
+    if (currentPage === 'studio-profile' || currentPage === 'studio') {
+      const targetStudioId = pageParams?.studioId || studios[0]?.id;
+      return (
+        <StudioProfileView
+          studioId={targetStudioId}
+          studios={studios}
+          services={services}
+          packages={packages}
+          printProducts={printProducts}
+          currentUser={currentUser}
+          onNavigate={handleNavigate}
+          onOpenBooking={handleOpenBooking}
+          onOpenPrintOrder={studio => setPrintOrderStudio(studio)}
+          favorites={favorites}
+          onToggleFavorite={toggleFavorite}
+        />
+      );
+    }
+
     if (currentPage.startsWith('custom-')) {
       const pageId = pageParams?.pageId;
       const targetPage = customPages.find(p => p.id === pageId || `custom-${p.slug}` === currentPage);
@@ -358,7 +409,7 @@ export function App() {
   const unreadCount = notifications.filter(n => !n.isRead).length;
 
   return (
-    <div className="min-h-screen flex flex-col bg-stone-50 text-stone-900 selection:bg-amber-600 selection:text-white font-sans antialiased">
+    <div className="min-h-screen flex flex-col bg-stone-50 text-stone-900 selection:bg-amber-600 selection:text-white font-sans antialiased overflow-hidden max-w-full">
       {/* Top Scroll Indicator */}
       <ScrollProgressBar />
 
@@ -506,6 +557,9 @@ export function App() {
           currentUser={currentUser}
           onOrderComplete={(order, method) => {
             loadNotifications();
+            toast.success(`Matagumpay na naipasa ang iyong print order (#${order.id})!`, {
+              title: 'Order Submitted'
+            });
             if (method === 'gcash') {
               apiRequest<GCashQRSession>('/api/payments/gcash/create-session', {
                 method: 'POST',
@@ -516,7 +570,10 @@ export function App() {
                 })
               })
                 .then(session => setGcashSession(session))
-                .catch(err => console.error(err));
+                .catch(err => {
+                  console.error(err);
+                  toast.error('Hindi ma-load ang GCash payment para sa order.');
+                });
             }
           }}
           onRequireLogin={() => {
@@ -534,9 +591,15 @@ export function App() {
         onPaymentConfirmed={(data) => {
           setGcashSession(null);
           loadNotifications();
+          toast.success('Kumpirmado na ang iyong bayad sa GCash! Maraming salamat.', {
+            title: 'Bayad Tanggap'
+          });
           window.dispatchEvent(new CustomEvent('booking-payment-confirmed', { detail: data }));
         }}
       />
+
+      {/* Global Toast & Action Status Notification Container */}
+      <ToastContainer />
     </div>
   );
 }

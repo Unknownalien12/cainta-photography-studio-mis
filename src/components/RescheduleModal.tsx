@@ -2,6 +2,7 @@ import React, { useState } from 'react';
 import { X, Calendar, Clock, AlertCircle, CheckCircle2 } from 'lucide-react';
 import type { Booking } from '../db/types.js';
 import { apiRequest } from '../utils/apiClient.js';
+import { toast } from '../utils/toast.js';
 
 interface RescheduleModalProps {
   isOpen: boolean;
@@ -47,10 +48,15 @@ export const RescheduleModal: React.FC<RescheduleModalProps> = ({
           })
         }
       );
+      toast.success(`Matagumpay na nailipat ang iyong session sa ${newDate} (${newTime})!`, {
+        title: 'Rescheduled'
+      });
       onRescheduled(res.booking);
       onClose();
     } catch (err: any) {
-      setErrorMsg(err.message || 'Slot unavailable on that date');
+      const msg = err.message || 'Slot unavailable on that date';
+      setErrorMsg(msg);
+      toast.error(msg, { title: 'Reschedule Error' });
     } finally {
       setIsSubmitting(false);
     }

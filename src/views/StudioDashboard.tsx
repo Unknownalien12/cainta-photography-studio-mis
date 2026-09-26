@@ -41,6 +41,8 @@ import {
   Link2
 } from 'lucide-react';
 import { StudioSocialLinks, formatUrl, FacebookIcon, InstagramIcon, TikTokIcon, YouTubeIcon, TwitterIcon } from '../components/StudioSocialLinks.js';
+import { toast } from '../utils/toast.js';
+import { ActionStatusBadge } from '../components/ActionStatus.js';
 
 const processImageFiles = async (files: FileList | File[]): Promise<string[]> => {
   const fileArray = Array.from(files);
@@ -296,18 +298,20 @@ export const StudioDashboard: React.FC<StudioDashboardProps> = ({
       setPromoTitle('');
       setPromoCode('');
       setPromoDesc('');
-    } catch (err) {
-      alert('Failed to save promotion');
+      toast.success(`Nai-save ang promo: "${p.title}"!`, { title: 'Promotion Saved' });
+    } catch (err: any) {
+      toast.error(err.message || 'Nabigo ang pag-save ng promotion', { title: 'Promo Error' });
     }
   };
 
   const handleDeleteStudioPromo = async (id: string) => {
-    if (!confirm('Are you sure you want to delete this promotion?')) return;
+    if (!confirm('Sigurado ka bang nais mong burahin ang promotion na ito?')) return;
     try {
       await apiRequest(`/api/promotions/${id}`, { method: 'DELETE' });
       setPromotions(prev => prev.filter(p => p.id !== id));
-    } catch (err) {
-      alert('Failed to delete promotion');
+      toast.success('Nabura ang promotion mula sa studio page.', { title: 'Promo Deleted' });
+    } catch (err: any) {
+      toast.error(err.message || 'Nabigo ang pagbura sa promotion', { title: 'Delete Error' });
     }
   };
 
@@ -355,8 +359,9 @@ export const StudioDashboard: React.FC<StudioDashboardProps> = ({
         body: JSON.stringify({ studioId: studio.id })
       });
       setSentimentSummary(res.summary);
-    } catch (err) {
-      alert('Failed to generate weekly sentiment summary.');
+      toast.success('Nabuo ang AI sentiment summary para sa iyong mga reviews!', { title: 'AI Analysis' });
+    } catch (err: any) {
+      toast.error(err.message || 'Nabigo ang AI analysis', { title: 'AI Error' });
     } finally {
       setIsGeneratingSentiment(false);
     }
@@ -371,9 +376,10 @@ export const StudioDashboard: React.FC<StudioDashboardProps> = ({
       });
       setReplyingReviewId(null);
       setReplyText('');
+      toast.success('Naipasa ang iyong opisyal na sagot sa review!', { title: 'Review Replied' });
       loadStudioData();
-    } catch (err) {
-      alert('Failed to post reply');
+    } catch (err: any) {
+      toast.error(err.message || 'Nabigo ang pag-post ng sagot', { title: 'Reply Error' });
     }
   };
 
@@ -383,9 +389,12 @@ export const StudioDashboard: React.FC<StudioDashboardProps> = ({
         method: 'PUT',
         body: JSON.stringify({ isVisible: !currentVisible })
       });
+      toast.info(currentVisible ? 'Naitago ang review mula sa public view.' : 'Nai-publish at makikita na ang review sa publiko.', {
+        title: 'Review Visibility'
+      });
       loadStudioData();
-    } catch (err) {
-      alert('Failed to update review visibility');
+    } catch (err: any) {
+      toast.error(err.message || 'Nabigo ang pag-update sa review', { title: 'Visibility Error' });
     }
   };
 
@@ -397,8 +406,9 @@ export const StudioDashboard: React.FC<StudioDashboardProps> = ({
         body: JSON.stringify(item)
       });
       setInventory(prev => [created, ...prev]);
-    } catch (err) {
-      console.error('Failed to add equipment:', err);
+      toast.success(`Naidagdag ang "${created.name}" sa studio gear inventory!`, { title: 'Gear Added' });
+    } catch (err: any) {
+      toast.error(err.message || 'Nabigo ang pagdagdag ng equipment', { title: 'Inventory Error' });
       throw err;
     }
   };
@@ -422,8 +432,9 @@ export const StudioDashboard: React.FC<StudioDashboardProps> = ({
             : item
         )
       );
-    } catch (err) {
-      console.error('Failed to update gear status:', err);
+      toast.success('Na-update ang equipment status at assignment.', { title: 'Gear Status' });
+    } catch (err: any) {
+      toast.error(err.message || 'Nabigo ang pag-update ng gear', { title: 'Inventory Error' });
       throw err;
     }
   };
@@ -434,8 +445,9 @@ export const StudioDashboard: React.FC<StudioDashboardProps> = ({
         method: 'DELETE'
       });
       setInventory(prev => prev.filter(item => item.id !== id));
-    } catch (err) {
-      console.error('Failed to delete gear:', err);
+      toast.success('Tinanggal ang equipment mula sa inventory.', { title: 'Gear Removed' });
+    } catch (err: any) {
+      toast.error(err.message || 'Nabigo ang pagbura ng gear', { title: 'Inventory Error' });
       throw err;
     }
   };
@@ -447,9 +459,10 @@ export const StudioDashboard: React.FC<StudioDashboardProps> = ({
         method: 'PUT',
         body: JSON.stringify({ status })
       });
+      toast.success(`Na-update ang booking (#${bookingId}) status sa "${status}".`, { title: 'Booking Updated' });
       loadStudioData();
-    } catch (err) {
-      alert('Failed to update booking status');
+    } catch (err: any) {
+      toast.error(err.message || 'Nabigo ang pag-update ng booking status', { title: 'Booking Error' });
     }
   };
 
@@ -460,9 +473,10 @@ export const StudioDashboard: React.FC<StudioDashboardProps> = ({
         method: 'PUT',
         body: JSON.stringify({ status, trackingNumber })
       });
+      toast.success(`Na-update ang print order (#${orderId}) status sa "${status}".`, { title: 'Print Order Updated' });
       loadStudioData();
-    } catch (err) {
-      alert('Failed to update print status');
+    } catch (err: any) {
+      toast.error(err.message || 'Nabigo ang pag-update sa print order', { title: 'Print Order Error' });
     }
   };
 
@@ -533,20 +547,22 @@ export const StudioDashboard: React.FC<StudioDashboardProps> = ({
           method: 'PUT',
           body: JSON.stringify(payload)
         });
+        toast.success(`Matagumpay na na-update ang serbisyo: "${payload.name}"!`, { title: 'Service Updated' });
       } else {
         const res = await apiRequest<Service>(`/api/studios/${studio.id}/services`, {
           method: 'POST',
           body: JSON.stringify(payload)
         });
         setServices(prev => [...prev, res]);
+        toast.success(`Matagumpay na naidagdag ang bagong serbisyo: "${res.name}"!`, { title: 'Service Created' });
       }
       
       loadStudioData();
       setShowAddService(false);
       setEditingService(null);
       resetServiceForm();
-    } catch (err) {
-      alert('Failed to save service');
+    } catch (err: any) {
+      toast.error(err.message || 'Nabigo ang pag-save ng serbisyo', { title: 'Service Error' });
     }
   };
 
@@ -575,12 +591,13 @@ export const StudioDashboard: React.FC<StudioDashboardProps> = ({
   };
 
   const handleDeleteService = async (id: string) => {
-    if (!confirm('Are you sure you want to delete this service?')) return;
+    if (!confirm('Sigurado ka bang nais mong burahin ang serbisyong ito?')) return;
     try {
       await apiRequest(`/api/studios/${studio.id}/services/${id}`, { method: 'DELETE' });
       setServices(prev => prev.filter(s => s.id !== id));
-    } catch (err) {
-      alert('Failed to delete service');
+      toast.success('Nabura ang serbisyo mula sa studio packages/services.', { title: 'Service Deleted' });
+    } catch (err: any) {
+      toast.error(err.message || 'Nabigo ang pagbura ng serbisyo', { title: 'Delete Error' });
     }
   };
 
@@ -610,20 +627,22 @@ export const StudioDashboard: React.FC<StudioDashboardProps> = ({
           method: 'PUT',
           body: JSON.stringify(payload)
         });
+        toast.success(`Matagumpay na na-update ang package: "${payload.name}"!`, { title: 'Package Updated' });
       } else {
         const res = await apiRequest<Package>(`/api/studios/${studio.id}/packages`, {
           method: 'POST',
           body: JSON.stringify(payload)
         });
         setPackages(prev => [...prev, res]);
+        toast.success(`Matagumpay na nagawa ang bagong package: "${res.name}"!`, { title: 'Package Created' });
       }
 
       loadStudioData();
       setShowAddPackage(false);
       setEditingPackage(null);
       resetPackageForm();
-    } catch (err) {
-      alert('Failed to save package');
+    } catch (err: any) {
+      toast.error(err.message || 'Nabigo ang pag-save ng package', { title: 'Package Error' });
     }
   };
 
@@ -656,12 +675,13 @@ export const StudioDashboard: React.FC<StudioDashboardProps> = ({
   };
 
   const handleDeletePackage = async (id: string) => {
-    if (!confirm('Are you sure you want to delete this package?')) return;
+    if (!confirm('Sigurado ka bang nais mong burahin ang package na ito?')) return;
     try {
       await apiRequest(`/api/studios/${studio.id}/packages/${id}`, { method: 'DELETE' });
       setPackages(prev => prev.filter(p => p.id !== id));
-    } catch (err) {
-      alert('Failed to delete package');
+      toast.success('Nabura ang package mula sa listahan.', { title: 'Package Deleted' });
+    } catch (err: any) {
+      toast.error(err.message || 'Nabigo ang pagbura ng package', { title: 'Delete Error' });
     }
   };
 
@@ -673,6 +693,11 @@ export const StudioDashboard: React.FC<StudioDashboardProps> = ({
     reader.onload = () => {
       setEditGcashQrCode(reader.result as string);
       setIsUploadingQr(false);
+      toast.success('Matagumpay na na-upload ang bagong GCash QR Code preview!', { title: 'QR Uploaded' });
+    };
+    reader.onerror = () => {
+      setIsUploadingQr(false);
+      toast.error('Hindi ma-basa ang image file.');
     };
     reader.readAsDataURL(file);
   };
@@ -690,9 +715,18 @@ export const StudioDashboard: React.FC<StudioDashboardProps> = ({
       setVerifyingBooking(null);
       setShowRejectInput(false);
       setRejectReason('');
+      if (status === 'verified') {
+        toast.success(`Na-verify at inaprubahan ang bayad para sa Booking #${bookingId}!`, {
+          title: 'Payment Verified'
+        });
+      } else {
+        toast.warning(`Tinanggihan ang payment proof para sa Booking #${bookingId}.`, {
+          title: 'Payment Rejected'
+        });
+      }
       loadStudioData();
     } catch (err: any) {
-      alert(err.message || 'Failed to update payment status');
+      toast.error(err.message || 'Nabigo ang pag-update sa payment status', { title: 'Verification Error' });
     } finally {
       setIsProcessingVerification(false);
     }
@@ -731,9 +765,12 @@ export const StudioDashboard: React.FC<StudioDashboardProps> = ({
       });
       onUpdateStudio(updated);
       setSavedSettingsNotice(true);
+      toast.success('Nai-save ang mga bagong detalye at social media links ng iyong studio!', {
+        title: 'Settings Saved'
+      });
       setTimeout(() => setSavedSettingsNotice(false), 3000);
-    } catch (err) {
-      alert('Failed to update studio profile');
+    } catch (err: any) {
+      toast.error(err.message || 'Nabigo ang pag-update ng studio profile', { title: 'Save Error' });
     }
   };
 

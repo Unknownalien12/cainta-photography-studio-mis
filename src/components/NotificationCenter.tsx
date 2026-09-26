@@ -2,6 +2,7 @@ import React from 'react';
 import { X, Check, Bell, Calendar, CreditCard, Image, AlertCircle, Trash2 } from 'lucide-react';
 import type { Notification } from '../db/types.js';
 import { apiRequest } from '../utils/apiClient.js';
+import { toast } from '../utils/toast.js';
 
 interface NotificationCenterProps {
   isOpen: boolean;
@@ -32,6 +33,7 @@ export const NotificationCenter: React.FC<NotificationCenterProps> = ({
   const handleMarkAllAsRead = async () => {
     try {
       await apiRequest('/api/notifications/read-all', { method: 'PUT' });
+      toast.info('Minarkahan ang lahat ng notifications bilang nabasa na.', { title: 'Notifications' });
       onNotificationsChange();
     } catch (err) {
       console.error(err);

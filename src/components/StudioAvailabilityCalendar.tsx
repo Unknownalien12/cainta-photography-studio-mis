@@ -2,6 +2,7 @@ import React, { useState, useEffect } from 'react';
 import { Calendar, Clock, Plus, Trash2, X, ChevronLeft, ChevronRight, CheckCircle2, AlertCircle } from 'lucide-react';
 import type { Booking, AvailabilityBlackout } from '../db/types.js';
 import { apiRequest } from '../utils/apiClient.js';
+import { toast } from '../utils/toast.js';
 
 interface StudioAvailabilityCalendarProps {
   studioId: string;
@@ -131,9 +132,12 @@ export const StudioAvailabilityCalendar: React.FC<StudioAvailabilityCalendarProp
       setBlackouts(prev => [...prev, res]);
       setSelectedDateStr(null);
       setBlockReason('');
+      toast.success(`Na-block ang petsa (${selectedDateStr}) para sa "${res.reason}"!`, {
+        title: 'Date Blocked'
+      });
       if (onRefreshData) onRefreshData();
-    } catch (err) {
-      alert('Failed to block date');
+    } catch (err: any) {
+      toast.error(err.message || 'Nabigo ang pag-block ng petsa', { title: 'Blackout Error' });
     } finally {
       setIsSubmitting(false);
     }
@@ -145,9 +149,10 @@ export const StudioAvailabilityCalendar: React.FC<StudioAvailabilityCalendarProp
         method: 'DELETE'
       });
       setBlackouts(prev => prev.filter(b => b.id !== id));
+      toast.success('Naibalik sa open status ang petsa.', { title: 'Date Unblocked' });
       if (onRefreshData) onRefreshData();
-    } catch (err) {
-      alert('Failed to remove blackout');
+    } catch (err: any) {
+      toast.error(err.message || 'Nabigo ang pag-alis ng blackout', { title: 'Delete Error' });
     }
   };
 

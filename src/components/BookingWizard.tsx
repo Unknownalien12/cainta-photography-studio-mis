@@ -20,6 +20,7 @@ import { generateBookingReceiptPDF } from '../utils/pdfGenerator.js';
 import { getGoogleCalendarUrl, downloadICSFile } from '../utils/calendarSync.js';
 import { playCameraShutter } from '../utils/soundEffects.js';
 import { StudioSocialLinks } from './StudioSocialLinks.js';
+import { toast } from '../utils/toast.js';
 
 interface BookingWizardProps {
   isOpen: boolean;
@@ -153,9 +154,14 @@ export const BookingWizard: React.FC<BookingWizardProps> = ({
 
       setCompletedBooking(booking);
       setStep(6); // confirmation step
+      toast.success(`Matagumpay na naitakda ang reservation sa ${studio.name}!`, {
+        title: 'Booking Saved'
+      });
       onBookingComplete(booking, paymentOption, paymentMethod);
     } catch (err: any) {
-      setErrorMsg(err.message || 'Failed to create booking. Please check slot availability.');
+      const msg = err.message || 'Hindi ma-proseso ang booking. Pakisuri ang slot availability.';
+      setErrorMsg(msg);
+      toast.error(msg, { title: 'Booking Failed' });
     } finally {
       setIsSubmitting(false);
     }

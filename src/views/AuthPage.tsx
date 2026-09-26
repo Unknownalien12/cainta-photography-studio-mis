@@ -1,7 +1,9 @@
 import React, { useState, useEffect, useRef } from 'react';
-import { Camera, ShieldCheck, User as UserIcon, Store, Eye, EyeOff, Lock, Mail, Phone, MapPin, Building, Sparkles } from 'lucide-react';
+import { Camera, ShieldCheck, User as UserIcon, Store, Eye, EyeOff, Lock, Mail, Phone, MapPin, Building, Sparkles, CheckCircle2, AlertCircle } from 'lucide-react';
 import type { User } from '../db/types.js';
 import { apiRequest, setStoredToken } from '../utils/apiClient.js';
+import { toast } from '../utils/toast.js';
+import { ActionStatusBadge } from '../components/ActionStatus.js';
 
 interface AuthPageProps {
   onLoginSuccess: (user: User) => void;
@@ -61,6 +63,63 @@ export const AuthPage: React.FC<AuthPageProps> = ({ onLoginSuccess, initialRole 
   const [googleManualEmail, setGoogleManualEmail] = useState('');
   const [googleManualName, setGoogleManualName] = useState('');
 
+  // Forgot Password Flow State
+  const [showForgotModal, setShowForgotModal] = useState(false);
+  const [forgotEmail, setForgotEmail] = useState('');
+  const [resetTokenInput, setResetTokenInput] = useState('');
+  const [newPasswordInput, setNewPasswordInput] = useState('');
+  const [forgotStep, setForgotStep] = useState<'request' | 'reset'>('request');
+  const [forgotLoading, setForgotLoading] = useState(false);
+  const [debugTokenDisplay, setDebugTokenDisplay] = useState<string | null>(null);
+
+  const handleRequestReset = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!forgotEmail.includes('@')) return;
+    setForgotLoading(true);
+    try {
+      const res = await apiRequest<{ success: boolean; message: string; debugToken?: string }>('/api/auth/forgot-password', {
+        method: 'POST',
+        body: JSON.stringify({ email: forgotEmail })
+      });
+      toast.success(res.message || 'Naipadala na ang reset token sa iyong email via SMTP.', { title: 'Reset Email Sent' });
+      if (res.debugToken) {
+        setDebugTokenDisplay(res.debugToken);
+        setResetTokenInput(res.debugToken);
+      }
+      setForgotStep('reset');
+    } catch (err: any) {
+      toast.error(err?.message || 'Hindi maipadala ang reset email.', { title: 'Error' });
+    } finally {
+      setForgotLoading(false);
+    }
+  };
+
+  const handleExecuteReset = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!resetTokenInput || newPasswordInput.length < 6) {
+      toast.error('Ilagay ang wastong reset token at bagong password (min. 6 chars).', { title: 'Invalid Input' });
+      return;
+    }
+    setForgotLoading(true);
+    try {
+      const res = await apiRequest<{ success: boolean; message: string }>('/api/auth/reset-password', {
+        method: 'POST',
+        body: JSON.stringify({ resetToken: resetTokenInput.trim(), newPassword: newPasswordInput })
+      });
+      toast.success(res.message || 'Matagumpay na napalitan ang password!', { title: 'Password Reset Successful' });
+      setShowForgotModal(false);
+      setForgotStep('request');
+      setForgotEmail('');
+      setResetTokenInput('');
+      setNewPasswordInput('');
+      setDebugTokenDisplay(null);
+    } catch (err: any) {
+      toast.error(err?.message || 'Hindi na-reset ang password.', { title: 'Reset Error' });
+    } finally {
+      setForgotLoading(false);
+    }
+  };
+
   const googleBtnContainerRef = useRef<HTMLDivElement>(null);
 
   // Authenticate with Google endpoint on server
@@ -89,9 +148,14 @@ export const AuthPage: React.FC<AuthPageProps> = ({ onLoginSuccess, initialRole 
         setStoredToken(res.token);
       }
       setShowGooglePromptModal(false);
+      toast.success(`Malugod na pagdating, ${res.user.fullName}!`, {
+        title: isRegister ? 'Account Created' : 'Naka-sign In'
+      });
       onLoginSuccess(res.user);
     } catch (err: any) {
-      setErrorMsg(err.message || 'Hindi matagumpay ang Google Sign-in. Pakisubukang muli.');
+      const msg = err.message || 'Hindi matagumpay ang Google Sign-in. Pakisubukang muli.';
+      setErrorMsg(msg);
+      toast.error(msg, { title: 'Google Auth Failed' });
     } finally {
       setIsGoogleLoading(false);
     }
@@ -241,6 +305,9 @@ export const AuthPage: React.FC<AuthPageProps> = ({ onLoginSuccess, initialRole 
         if (res.token) {
           setStoredToken(res.token);
         }
+        toast.success(`Matagumpay na narehistro ang iyong account, ${res.user.fullName}!`, {
+          title: 'Account Registered'
+        });
         onLoginSuccess(res.user);
       } else {
         const res = await apiRequest<{ message?: string; token: string; user: User }>('/api/auth/login', {
@@ -254,10 +321,15 @@ export const AuthPage: React.FC<AuthPageProps> = ({ onLoginSuccess, initialRole 
         if (res.token) {
           setStoredToken(res.token);
         }
+        toast.success(`Malugod na pagbabalik, ${res.user.fullName}!`, {
+          title: 'Naka-sign In'
+        });
         onLoginSuccess(res.user);
       }
     } catch (err: any) {
-      setErrorMsg(err.message || 'May naganap na error sa pag-authenticate. Pakisubukang muli.');
+      const msg = err.message || 'May naganap na error sa pag-authenticate. Pakisubukang muli.';
+      setErrorMsg(msg);
+      toast.error(msg, { title: 'Authentication Error' });
     } finally {
       setIsLoading(false);
     }
@@ -516,6 +588,21 @@ export const AuthPage: React.FC<AuthPageProps> = ({ onLoginSuccess, initialRole 
                 {showPassword ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
               </button>
             </div>
+            {!isRegister && (
+              <div className="flex justify-end pt-1">
+                <button
+                  type="button"
+                  onClick={() => {
+                    setShowForgotModal(true);
+                    setForgotStep('request');
+                    setForgotEmail(email || '');
+                  }}
+                  className="text-xs font-semibold text-amber-600 hover:text-amber-700 transition-colors"
+                >
+                  Nakalimutan ang Password?
+                </button>
+              </div>
+            )}
           </div>
 
           {/* Confirm Password (Registration only) */}
@@ -676,6 +763,116 @@ export const AuthPage: React.FC<AuthPageProps> = ({ onLoginSuccess, initialRole 
                   </button>
                 </div>
               </form>
+            </div>
+          </div>
+        )}
+
+        {/* Forgot Password Modal */}
+        {showForgotModal && (
+          <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/60 backdrop-blur-xs animate-fadeIn">
+            <div className="w-full max-w-sm bg-white rounded-3xl p-6 shadow-2xl border border-stone-200 space-y-4 animate-scaleUp">
+              <div className="flex justify-between items-center">
+                <h4 className="font-bold text-sm text-stone-900">Reset Password (SMTP Email)</h4>
+                <button
+                  type="button"
+                  onClick={() => setShowForgotModal(false)}
+                  className="text-stone-400 hover:text-stone-600 text-xs font-bold p-1"
+                >
+                  ✕
+                </button>
+              </div>
+
+              {forgotStep === 'request' ? (
+                <form onSubmit={handleRequestReset} className="space-y-3 text-xs">
+                  <p className="text-xs text-stone-600 leading-relaxed">
+                    Ilagay ang iyong rehistradong email address. Magpapadala kami ng secure password reset token sa iyong email via SMTP.
+                  </p>
+                  <div>
+                    <label className="font-semibold block text-stone-700 mb-1">Email Address</label>
+                    <input
+                      type="email"
+                      required
+                      placeholder="hal. juandelacruz@gmail.com"
+                      value={forgotEmail}
+                      onChange={e => setForgotEmail(e.target.value)}
+                      className="w-full px-3 py-2.5 bg-stone-50 border border-stone-200 rounded-xl focus:bg-white focus:ring-2 focus:ring-amber-500 text-stone-800"
+                      autoFocus
+                    />
+                  </div>
+
+                  <div className="pt-2 flex gap-2">
+                    <button
+                      type="button"
+                      onClick={() => setShowForgotModal(false)}
+                      className="w-1/2 py-2.5 rounded-xl border border-stone-200 text-stone-600 hover:bg-stone-50 font-semibold"
+                    >
+                      Kanselahin
+                    </button>
+                    <button
+                      type="submit"
+                      disabled={forgotLoading}
+                      className="w-1/2 py-2.5 rounded-xl bg-amber-600 hover:bg-amber-500 text-white font-bold shadow-md flex items-center justify-center gap-1.5 disabled:opacity-50"
+                    >
+                      {forgotLoading ? 'Nagpapadala...' : 'Ipadala ang Token'}
+                    </button>
+                  </div>
+                </form>
+              ) : (
+                <form onSubmit={handleExecuteReset} className="space-y-3 text-xs">
+                  <p className="text-xs text-stone-600 leading-relaxed">
+                    Naipadala na ang reset token sa <span className="font-semibold text-stone-900">{forgotEmail}</span>. Ilagay ito kasama ang iyong bagong password.
+                  </p>
+
+                  {debugTokenDisplay && (
+                    <div className="p-2.5 bg-amber-50 border border-amber-200 rounded-xl text-[11px] text-amber-900 space-y-1">
+                      <div className="font-bold">🔑 Debug Reset Token (SMTP Simulated):</div>
+                      <div className="font-mono bg-white p-1.5 rounded border border-amber-300 break-all select-all">{debugTokenDisplay}</div>
+                    </div>
+                  )}
+
+                  <div>
+                    <label className="font-semibold block text-stone-700 mb-1">Password Reset Token</label>
+                    <input
+                      type="text"
+                      required
+                      placeholder="I-paste ang reset token dito"
+                      value={resetTokenInput}
+                      onChange={e => setResetTokenInput(e.target.value)}
+                      className="w-full px-3 py-2 bg-stone-50 border border-stone-200 rounded-xl focus:bg-white focus:ring-2 focus:ring-amber-500 text-stone-800 font-mono text-[11px]"
+                    />
+                  </div>
+
+                  <div>
+                    <label className="font-semibold block text-stone-700 mb-1">Bagong Password (New Password)</label>
+                    <input
+                      type="password"
+                      required
+                      minLength={6}
+                      placeholder="Min. 6 characters"
+                      value={newPasswordInput}
+                      onChange={e => setNewPasswordInput(e.target.value)}
+                      className="w-full px-3 py-2 bg-stone-50 border border-stone-200 rounded-xl focus:bg-white focus:ring-2 focus:ring-amber-500 text-stone-800"
+                    />
+                  </div>
+
+                  <div className="pt-2 flex gap-2">
+                    <button
+                      type="button"
+                      onClick={() => setForgotStep('request')}
+                      className="w-1/2 py-2.5 rounded-xl border border-stone-200 text-stone-600 hover:bg-stone-50 font-semibold"
+                    >
+                      Bumalik
+                    </button>
+                    <button
+                      type="submit"
+                      disabled={forgotLoading}
+                      className="w-1/2 py-2.5 rounded-xl bg-amber-600 hover:bg-amber-500 text-white font-bold shadow-md flex items-center justify-center gap-1.5 disabled:opacity-50"
+                    >
+                      {forgotLoading ? 'Nagse-save...' : 'Baguhin ang Password'}
+                    </button>
+                  </div>
+                </form>
+              )}
             </div>
           </div>
         )}
